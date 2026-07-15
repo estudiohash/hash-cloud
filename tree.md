@@ -10,17 +10,26 @@ hash-cloud/
 │   │   └── router.py       Endpoints OAuth y JWT (/login, /callback, /me).
 │   │
 │   ├── context/
-│   │   └── router.py       Endpoint de contexto del usuario (/context).
+│   │   ├── provider.py     ContextProvider. Expone el contexto propio de HASH.
+│   │   └── router.py       Endpoint /context. Devuelve identidad del usuario y contexto de HASH.
+│   │
+│   ├── memory/
+│   │   ├── repository.py       Asociación user_id → spreadsheet_id. Único punto de cambio al migrar persistencia.
+│   │   ├── service.py          Lógica de negocio: verificar, crear y asociar memoria del usuario.
+│   │   ├── router.py           Endpoints /memory/status, /memory/session, /memory/authorize, /memory/callback.
+│   │   └── memory_index.json   Índice local: user_id → spreadsheet_id. No versionado.
 │   │
 │   ├── api/                Punto de entrada de las solicitudes HTTP externas.
 │   ├── cognition/          Orquestación del proceso de razonamiento y respuesta.
-│   ├── compiler/           Compilación y estructuración del conocimiento acumulado.
-│   │
+│   ├── compiler/           Compila memoria de HASH y memoria del usuario como entradas independientes
+│   │                       para construir el contexto temporal del motor de respuesta.
 │   ├── core/
-│   │   ├── config.py       Lectura de variables de entorno.
-│   │   └── jwt.py          Generación, validación y dependencia de autenticación.
+│   │   ├── config.py                   Lectura de variables de entorno.
+│   │   ├── jwt.py                      Generación, validación y dependencia de autenticación.
+│   │   ├── encryption.py               Cifrado y descifrado de credenciales con clave del servidor.
+│   │   ├── credentials_repository.py   Asociación user_id → refresh_token cifrado. No versionado.
+│   │   └── credentials.json            Credenciales cifradas de Google por usuario. No versionado.
 │   │
-│   ├── memory/             Acceso y sincronización con la memoria persistente (Google Drive).
 │   └── services/           Integración con servicios externos.
 │
 ├── docs/               Documentación técnica del proyecto.
@@ -45,3 +54,5 @@ hash-cloud/
 **Sprint 2.2** — `app/core/jwt.py` agregado. JWT generado en callback y validado en `/auth/me`.
 **Sprint 2.3** — `require_auth` implementado como dependencia. Validación centralizada en `jwt.py`.
 **Sprint 3.1** — `app/context/router.py` agregado. `/context` devuelve identidad del usuario autenticado.
+**Sprint 3.2** — `app/context/provider.py` agregado. ContextProvider expone las cuatro fuentes del sistema.
+**Sprint 4.1** — `app/memory/` operativo. Verificación, autorización incremental y creación de memoria del usuario en Google Sheets. Refresh token cifrado persistido en `app/core/credentials.json`.

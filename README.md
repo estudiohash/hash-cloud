@@ -187,3 +187,6 @@ Respuesta:
   }
 }
 ```
+
+**Sprint 3.2 — Completado**
+ContextProvider implementado. `/context` expone las cuatro fuentes del contexto interno de HASH como entidades conocidas del sistema. El contenido se resuelve en Sprint 5.
