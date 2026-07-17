@@ -6,6 +6,7 @@ from app.auth.router import router as auth_router
 from app.context.router import router as context_router
 from app.memory.router import router as memory_router
 from app.compiler.router import router as compiler_router
+from app.chat.router import router as chat_router
 
 app = FastAPI(title="HASH Cloud")
 
@@ -22,6 +23,7 @@ app.include_router(auth_router)
 app.include_router(context_router)
 app.include_router(memory_router)
 app.include_router(compiler_router)
+app.include_router(chat_router)
 
 
 @app.get("/health")
