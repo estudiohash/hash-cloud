@@ -10,13 +10,18 @@ from app.chat.router import router as chat_router
 
 app = FastAPI(title="HASH Cloud")
 
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://hash-ai.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    https_only=True,
+    same_site="none",
 )
 
 app.include_router(auth_router)
