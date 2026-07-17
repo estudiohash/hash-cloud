@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from authlib.integrations.starlette_client import OAuth
 from app.core.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-from app.core.jwt import require_auth
+from app.core.jwt import require_auth, decode_token
+from jwt import ExpiredSignatureError, InvalidTokenError
 from app.memory.service import check_memory_status, create_user_memory, read_user_memory, write_user_memory
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -46,16 +48,13 @@ def memory_status(user: dict = Depends(require_auth)):
     return {"user_id": user["id"], **result}
 
 
-@router.post("/session")
-def memory_session(request: Request, user: dict = Depends(require_auth)):
-    request.session["pending_user_id"] = user["id"]
-    return {"ok": True}
-
-
 @router.get("/authorize")
-async def memory_authorize(request: Request):
-    if not request.session.get("pending_user_id"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no iniciada")
+async def memory_authorize(request: Request, token: str = Query(...)):
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+    request.session["pending_user_id"] = payload.get("sub")
     return await oauth.google_sheets.authorize_redirect(
         request,
         MEMORY_CALLBACK_URI,
@@ -76,7 +75,8 @@ async def memory_callback(request: Request):
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token no recibido")
 
-    return create_user_memory(user_id, token["access_token"], refresh_token)
+    create_user_memory(user_id, token["access_token"], refresh_token)
+    return RedirectResponse(url="https://hash-ai.vercel.app/")
 
 
 @router.get("")

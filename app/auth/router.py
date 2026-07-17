@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 from app.core.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
 from app.core.jwt import create_token, require_auth
@@ -29,7 +30,7 @@ async def callback(request: Request):
         name=user.get("name"),
         email=user.get("email"),
     )
-    return {"token": jwt_token}
+    return RedirectResponse(url=f"https://hash-ai.vercel.app/?token={jwt_token}")
 
 
 @router.get("/me")

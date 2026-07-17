@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import SESSION_SECRET
 from app.auth.router import router as auth_router
@@ -9,6 +10,13 @@ from app.compiler.router import router as compiler_router
 app = FastAPI(title="HASH Cloud")
 
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://hash-ai.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(auth_router)
 app.include_router(context_router)
