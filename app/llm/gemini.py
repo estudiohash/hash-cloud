@@ -75,7 +75,7 @@ class GeminiProvider(LLMProvider):
             try:
                 with httpx.stream("POST", url, json=body, timeout=60) as response:
                     if response.status_code in (429, 503):
-                        last_error = response.text
+                        last_error = f"HTTP {response.status_code}"
                         continue
                     response.raise_for_status()
                     for line in response.iter_lines():
