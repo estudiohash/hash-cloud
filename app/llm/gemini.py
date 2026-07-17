@@ -46,7 +46,7 @@ class GeminiProvider(LLMProvider):
                 f"{self.model}:generateContent?key={key}"
             )
             try:
-                response = httpx.post(url, json=body, timeout=30)
+                response = httpx.post(url, json=body, timeout=60)
                 if response.status_code == 429 or response.status_code == 503:
                     last_error = response.text
                     continue
