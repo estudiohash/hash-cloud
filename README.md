@@ -115,10 +115,10 @@ pip install -r requirements.txt
 4. Agregar el usuario como tester en **Audiencia**
 5. Ir a **APIs y servicios → Credenciales → Crear credenciales → ID de cliente OAuth**
    - Tipo: Aplicación web
-   - Orígenes autorizados: `http://localhost:8000`
+   - Orígenes autorizados: `https://hash-cloud-production.up.railway.app`
    - URIs de redireccionamiento autorizados:
-     - `http://localhost:8000/auth/callback`
-     - `http://localhost:8000/memory/callback`
+     - `https://hash-cloud-production.up.railway.app/auth/callback`
+     - `https://hash-cloud-production.up.railway.app/memory/callback`
 6. Habilitar **Google Sheets API** en el proyecto
 7. Copiar el **Client ID** y **Client Secret** al `.env`
 

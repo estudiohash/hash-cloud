@@ -38,7 +38,7 @@ class GeminiProvider(LLMProvider):
 
     def __init__(self):
         self.keys = _load_api_keys()
-        self.model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+        self.model = os.getenv("LLM_MODEL", "gemini-3.5-flash")
         if not self.keys:
             raise RuntimeError("No hay claves de Gemini definidas en las variables de entorno")
 
