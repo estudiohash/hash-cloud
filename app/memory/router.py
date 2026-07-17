@@ -14,12 +14,12 @@ MEMORY_CALLBACK_URI = os.environ.get("MEMORY_CALLBACK_URI", "https://hash-cloud-
 
 oauth = OAuth()
 oauth.register(
-    name="google_sheets",
+    name="google_drive",
     client_id=GOOGLE_CLIENT_ID,
     client_secret=GOOGLE_CLIENT_SECRET,
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={
-        "scope": "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file",
+        "scope": "https://www.googleapis.com/auth/drive.file",
         "token_endpoint_auth_method": "client_secret_post",
     },
 )
@@ -56,7 +56,7 @@ async def memory_authorize(request: Request, token: str = Query(...)):
     except HTTPException:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     request.session["pending_user_id"] = payload.get("sub")
-    return await oauth.google_sheets.authorize_redirect(
+    return await oauth.google_drive.authorize_redirect(
         request,
         MEMORY_CALLBACK_URI,
         access_type="offline",
@@ -66,7 +66,7 @@ async def memory_authorize(request: Request, token: str = Query(...)):
 
 @router.get("/callback")
 async def memory_callback(request: Request):
-    token = await oauth.google_sheets.authorize_access_token(request)
+    token = await oauth.google_drive.authorize_access_token(request)
     user_id = request.session.get("pending_user_id")
 
     if not user_id:
