@@ -18,6 +18,7 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[Message]
+    provider: str | None = None
 
 
 def _build_system_prompt() -> str:
@@ -32,13 +33,36 @@ def _build_system_prompt() -> str:
     )
 
 
+def _is_quota_error(e: Exception) -> bool:
+    msg = str(e)
+    return "429" in msg or "503" in msg or "fallaron" in msg
+
+
+def _get_fallback_provider(provider_name: str):
+    """Devuelve el provider de fallback según el principal."""
+    if provider_name != "groq":
+        from app.llm.groq import GroqProvider
+        return GroqProvider()
+    return None
+
+
 @router.post("")
 def chat(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
         system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
-        llm = get_llm_provider()
-        reply = llm.generate(messages)
+        llm = get_llm_provider(body.provider)
+        try:
+            reply = llm.generate(messages)
+        except RuntimeError as e:
+            if _is_quota_error(e):
+                fallback = _get_fallback_provider(llm.__class__.__name__.lower().replace("provider", ""))
+                if fallback:
+                    reply = fallback.generate(messages)
+                else:
+                    raise
+            else:
+                raise
         return {"reply": reply}
     except NotImplementedError as e:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
@@ -57,9 +81,21 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         def event_stream():
             try:
                 for chunk in llm.generate_stream(messages):
-                    # Escapar saltos de línea para que SSE no rompa el protocolo
                     escaped = chunk.replace("\n", "\\n")
                     yield f"data: {escaped}\n\n"
+            except RuntimeError as e:
+                if _is_quota_error(e):
+                    # Fallback a Groq en streaming
+                    try:
+                        from app.llm.groq import GroqProvider
+                        fallback = GroqProvider()
+                        for chunk in fallback.generate_stream(messages):
+                            escaped = chunk.replace("\n", "\\n")
+                            yield f"data: {escaped}\n\n"
+                    except Exception as fe:
+                        yield f"data: [ERROR] {str(fe)}\n\n"
+                else:
+                    yield f"data: [ERROR] {str(e)}\n\n"
             except Exception as e:
                 yield f"data: [ERROR] {str(e)}\n\n"
             finally:
@@ -70,7 +106,7 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",  # desactiva buffering en nginx/Railway
+                "X-Accel-Buffering": "no",
             },
         )
     except Exception as e:
