@@ -153,6 +153,20 @@ def write_user_memory(user_id: str, document: str, name: str, description: str, 
 
     existing_sheets = [s["properties"]["title"] for s in spreadsheet["sheets"]]
 
+    # Si id_name no existe, recrearla con los headers correctos
+    if "id_name" not in existing_sheets:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": "id_name"}}}]},
+        ).execute()
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range="id_name!A1:D1",
+            valueInputOption="RAW",
+            body={"values": INITIAL_HEADERS},
+        ).execute()
+        existing_sheets.append("id_name")
+
     document_created = False
     if document not in existing_sheets:
         service.spreadsheets().batchUpdate(

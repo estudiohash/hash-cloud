@@ -30,7 +30,7 @@ async def callback(request: Request):
         name=user.get("name"),
         email=user.get("email"),
     )
-    return RedirectResponse(url=f"https://hash-ai.vercel.app/?token={jwt_token}")
+    return RedirectResponse(url=f"https://hash-ai.vercel.app/?token={jwt_token}", status_code=302)
 
 
 @router.get("/me")
