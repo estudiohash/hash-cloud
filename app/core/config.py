@@ -14,3 +14,7 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 CREDENTIALS_SECRET = os.getenv("CREDENTIALS_SECRET")
+
+# Postgres — reemplaza credentials.json y memory_index.json
+# En Railway: agregá un plugin de Postgres y copiá la variable DATABASE_URL que te genera.
+DATABASE_URL = os.getenv("DATABASE_URL")
