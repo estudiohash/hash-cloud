@@ -5,3 +5,12 @@ def get_hash_context() -> dict:
         "style": "pending",
         "destilador": "pending",
     }
+
+
+def get_hash_sources() -> dict:
+    return {
+        "personal_log": "",
+        "cognitive_base": "",
+        "style": "",
+        "destilador": "",
+    }
