@@ -10,7 +10,7 @@ from app.memory.service import check_memory_status, create_user_memory, read_use
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 import os
-MEMORY_CALLBACK_URI = os.environ.get("MEMORY_CALLBACK_URI", "http://localhost:8000/memory/callback")
+MEMORY_CALLBACK_URI = os.environ.get("MEMORY_CALLBACK_URI", "https://hash-cloud-production.up.railway.app/memory/callback")
 
 oauth = OAuth()
 oauth.register(
