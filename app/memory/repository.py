@@ -22,10 +22,10 @@ def get_user_memory(user_id: str) -> dict | None:
     return data["users"].get(user_id)
 
 
-def save_user_memory(user_id: str, spreadsheet_id: str) -> dict:
+def save_user_memory(user_id: str, file_id: str) -> dict:
     data = _load()
     entry = {
-        "spreadsheet_id": spreadsheet_id,
+        "file_id": file_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     data["users"][user_id] = entry
