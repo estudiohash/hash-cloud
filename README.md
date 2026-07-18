@@ -7,7 +7,6 @@ Backend del ecosistema HASH.
 HASH Cloud es el núcleo de infraestructura del ecosistema HASH. Concentra los servicios de autenticación, contexto, memoria, compilación de conocimiento y comunicación con servicios externos.
 
 No implementa el razonamiento del LLM.
-No almacena la memoria del usuario como fuente de verdad. La memoria persistente vive en Google Drive.
 
 ---
 
@@ -20,46 +19,40 @@ Estructura base del proyecto inicializada.
 Aplicación FastAPI funcionando localmente con endpoint `/health`.
 
 **Sprint 1.3 — Completado**
-Dockerfile y variables de entorno configurados. HASH Cloud ejecutable localmente y en Docker.
+Dockerfile y variables de entorno configurados.
 
 **Sprint 2.1 — Completado**
-Autenticación con Google OAuth implementada. HASH Cloud identifica al usuario autenticado y devuelve su información básica.
+Autenticación con Google OAuth implementada.
 
 **Sprint 2.2 — Completado**
 JWT implementado. El callback de Google genera un token. `/auth/me` valida el token y devuelve la identidad del usuario.
 
 **Sprint 2.3 — Completado**
-Autorización de rutas implementada mediante `Depends(require_auth)`. La validación del JWT dejó de estar inline en los endpoints y pasó a una dependencia reutilizable en `app/core/jwt.py`.
+Autorización de rutas implementada mediante `Depends(require_auth)`.
 
 **Sprint 3.1 — Completado**
-Context API base implementada. `/context` devuelve la identidad del usuario autenticado.
+Context API base implementada.
 
 **Sprint 3.2 — Completado**
-ContextProvider implementado. `/context` expone las cuatro fuentes del contexto interno de HASH. El contenido se resuelve en Sprint 5.
+ContextProvider implementado. `/context` expone las cuatro fuentes del contexto interno de HASH.
 
 **Sprint 4.1 — Completado**
-Memoria del usuario implementada. HASH solicita autorización incremental de Google Sheets, crea el documento de memoria en el Google Drive del usuario y registra la asociación `user_id → spreadsheet_id`. El refresh token se persiste cifrado con Fernet.
+Credenciales de usuario cifradas con Fernet y persistidas en Postgres.
 
 **Sprint 4.2 — Completado**
-Lectura de memoria implementada. `GET /memory` devuelve el objeto `Memory` completo del usuario desacoplado de Google Sheets, con `index` (contenido de `id_name`) y `documents` (resto de hojas).
-
-**Sprint 4.3 — Completado**
-Escritura de memoria implementada. `POST /memory` escribe registros en la memoria del usuario. Si el documento no existe, lo crea automáticamente y registra la entrada en `id_name` con UUID, nombre, descripción y timestamp.
-
-**Sprint 4.4 — Completado**
-Manejo de estados de memoria implementado. `GET /memory/status` detecta y comunica cuatro estados: `not_found`, `active`, `inaccessible`, `unauthorized`. HASH no toma acciones automáticas — solo informa el estado y el frontend decide cómo guiar al usuario.
+Persistencia de chats implementada. Los chats y mensajes se guardan en Postgres. Los mensajes se cifran en reposo con Fernet.
 
 **Sprint 5.1 — Completado**
-Base Compiler implementado. `GET /compiler/base` construye el `BaseContext` con las tres fuentes de identidad de HASH: `personal_log`, `cognitive_base` y `destilador`.
+Base Compiler implementado.
 
 **Sprint 5.2 — Completado**
-User Compiler implementado. `GET /compiler/user` construye el `UserContext` a partir del objeto `Memory` del usuario. No accede directamente al almacenamiento.
+User Compiler implementado.
 
 **Sprint 5.3 — Completado**
-Style Compiler implementado. `GET /compiler/style` construye el `StyleContext` a partir de la fuente `style`. Separado del `BaseContext` porque constituye una fuente independiente con responsabilidad propia.
+Style Compiler implementado.
 
 **Sprint 5.4 — Completado**
-Hash Compiler implementado. `GET /compiler/hash` construye el `HashContext` reuniendo los tres contextos independientes (`base`, `user`, `style`) sin fusionarlos ni modificar su contenido. Cada fuente conserva su identidad y origen.
+Hash Compiler implementado.
 
 ---
 
@@ -77,7 +70,8 @@ Hash Compiler implementado. `GET /compiler/hash` construye el `HashContext` reun
 | google-api-python-client | 2.169.0 |
 | google-auth | 2.40.3 |
 | google-auth-oauthlib | 1.2.1 |
-| cryptography | 44.0.3 |
+| cryptography | >=45.0.1 |
+| psycopg2-binary | 2.9.10 |
 
 Instalar:
 
@@ -91,10 +85,7 @@ pip install -r requirements.txt
 
 | Variable | Descripción |
 |---|---|
-| `APP_NAME` | Nombre de la aplicación |
-| `APP_ENV` | Entorno de ejecución (`development` / `production`) |
-| `HOST` | Host del servidor |
-| `PORT` | Puerto del servidor |
+| `DATABASE_URL` | Conexión a Postgres |
 | `GOOGLE_CLIENT_ID` | Client ID del proyecto en Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | Client Secret del proyecto en Google Cloud Console |
 | `GOOGLE_REDIRECT_URI` | URI de callback registrada en Google (`/auth/callback`) |
@@ -102,25 +93,26 @@ pip install -r requirements.txt
 | `JWT_SECRET` | Clave secreta para firmar los tokens JWT |
 | `JWT_ALGORITHM` | Algoritmo JWT (default: `HS256`) |
 | `JWT_EXPIRE_MINUTES` | Duración del token en minutos (default: `60`) |
-| `CREDENTIALS_SECRET` | Clave Fernet para cifrar el refresh token del usuario |
-| `MEMORY_CALLBACK_URI` | URI de callback para el flujo OAuth de memoria |
+| `CREDENTIALS_SECRET` | Clave Fernet de 44 caracteres para cifrar mensajes y credenciales |
+| `GEMINI_API_KEY` | API key de Gemini |
+| `GROQ_API_KEY` | API key de Groq (fallback) |
+
+Generar una clave Fernet válida:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ---
 
-## Configuración de Google OAuth
+## Base de datos
 
-1. Crear un proyecto en [Google Cloud Console](https://console.cloud.google.com)
-2. Ir a **APIs y servicios → Pantalla de consentimiento OAuth** y completar los datos básicos
-3. Agregar scopes: `spreadsheets` y `drive.file`
-4. Agregar el usuario como tester en **Audiencia**
-5. Ir a **APIs y servicios → Credenciales → Crear credenciales → ID de cliente OAuth**
-   - Tipo: Aplicación web
-   - Orígenes autorizados: `https://hash-cloud-production.up.railway.app`
-   - URIs de redireccionamiento autorizados:
-     - `https://hash-cloud-production.up.railway.app/auth/callback`
-     - `https://hash-cloud-production.up.railway.app/memory/callback`
-6. Habilitar **Google Sheets API** en el proyecto
-7. Copiar el **Client ID** y **Client Secret** al `.env`
+Tablas creadas automáticamente al arrancar:
+
+| Tabla | Descripción |
+|---|---|
+| `chats` | `chat_id`, `user_id`, `title`, `created_at`, `updated_at` |
+| `chat_messages` | `id`, `chat_id`, `role`, `content` (cifrado), `created_at` |
 
 ---
 
@@ -142,15 +134,6 @@ uvicorn app.main:app --reload
 
 ---
 
-## Ejecución con Docker
-
-```bash
-docker build -t hash-cloud .
-docker run --env-file .env -p 8000:8000 hash-cloud
-```
-
----
-
 ## Endpoints disponibles
 
 | Método | Ruta | Auth | Descripción |
@@ -159,17 +142,15 @@ docker run --env-file .env -p 8000:8000 hash-cloud
 | GET | `/auth/login` | No | Inicia el flujo OAuth con Google |
 | GET | `/auth/callback` | No | Callback de Google. Devuelve JWT |
 | GET | `/auth/me` | Bearer JWT | Devuelve identidad del usuario autenticado |
-| GET | `/context` | Bearer JWT | Devuelve identidad del usuario y contexto de HASH |
-| GET | `/memory/status` | Bearer JWT | Estado de la memoria del usuario |
-| POST | `/memory/session` | Bearer JWT | Registra la sesión antes del flujo OAuth de memoria |
-| GET | `/memory/authorize` | No (requiere sesión) | Inicia el flujo OAuth incremental de Google Sheets |
-| GET | `/memory/callback` | No | Callback OAuth de memoria. Crea el documento y persiste credenciales |
-| GET | `/memory` | Bearer JWT | Lee la memoria completa del usuario |
-| POST | `/memory` | Bearer JWT | Escribe un registro en la memoria del usuario |
+| GET | `/chat/list` | Bearer JWT | Lista todos los chats del usuario |
+| POST | `/chat/new` | Bearer JWT | Crea un chat vacío |
+| GET | `/chat/{id}/messages` | Bearer JWT | Devuelve el historial de mensajes de un chat |
+| PATCH | `/chat/{id}/title` | Bearer JWT | Renombra un chat |
+| DELETE | `/chat/{id}` | Bearer JWT | Elimina un chat y todos sus mensajes |
+| POST | `/chat` | Bearer JWT | Genera una respuesta (no-streaming) |
+| POST | `/chat/stream` | Bearer JWT | Genera una respuesta en streaming |
 | GET | `/compiler/base` | Bearer JWT | Construye el BaseContext de HASH |
-| GET | `/compiler/user` | Bearer JWT | Construye el UserContext del usuario |
 | GET | `/compiler/style` | Bearer JWT | Construye el StyleContext de HASH |
-| GET | `/compiler/hash` | Bearer JWT | Construye el HashContext completo |
 | GET | `/docs` | No | Documentación interactiva |
 
 ---
@@ -180,28 +161,38 @@ docker run --env-file .env -p 8000:8000 hash-cloud
 Usuario → GET /auth/login → Google → GET /auth/callback → { token }
 ```
 
-## Flujo de memoria
+## Flujo de chat
 
 ```
-POST /memory/session  (JWT en header)
-GET  /memory/authorize  (navegador)
-Google autoriza → GET /memory/callback → memoria creada
+POST /chat/stream  →  guarda mensaje usuario  →  stream respuesta  →  guarda respuesta  →  devuelve chat_id
 ```
-
-## Separación de memorias
-
-HASH mantiene dos memorias completamente independientes:
-
-- **Memoria de HASH** — identidad del sistema. Vive en el Modelo Cognitivo Base. No pertenece al usuario.
-- **Memoria del usuario** — activo del usuario. Vive en su Google Sheets. HASH solo accede con autorización explícita.
-
-El Compiler recibe ambas como entradas independientes y construye un contexto temporal. Nunca las fusiona.
 
 ---
 
 ## Arquitectura
 
-Ver [`tree.md`](./tree.md) para el mapa conceptual de la arquitectura actual.
+```
+app/
+├── main.py
+├── auth/router.py
+├── chat/
+│   ├── router.py
+│   ├── repository.py
+│   └── models.py
+├── llm/
+│   ├── factory.py
+│   ├── gemini.py
+│   ├── groq.py
+│   └── anthropic.py
+├── compiler/
+│   ├── base_compiler.py
+│   └── style_compiler.py
+└── core/
+    ├── config.py
+    ├── jwt.py
+    ├── encryption.py
+    └── database.py
+```
 
 ---
 
