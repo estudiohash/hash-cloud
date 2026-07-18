@@ -42,23 +42,23 @@ def _get_fallback_provider(provider_name: str):
 @router.get("/list")
 def list_chats(user: dict = Depends(require_auth)):
     """Devuelve todos los chats del usuario ordenados por actividad."""
-    return repo.list_chats(user["sub"])
+    return repo.list_chats(user["id"])
 
 
 @router.post("/new")
 def new_chat(user: dict = Depends(require_auth)):
     """Crea un chat vacío y devuelve su ID."""
-    chat = repo.create_chat(user["sub"])
+    chat = repo.create_chat(user["id"])
     return chat
 
 
 @router.get("/{chat_id}/messages")
 def get_messages(chat_id: str, user: dict = Depends(require_auth)):
     """Devuelve el historial de mensajes de un chat."""
-    chat = repo.get_chat(chat_id, user["sub"])
+    chat = repo.get_chat(chat_id, user["id"])
     if not chat:
         raise HTTPException(status_code=404, detail="Chat no encontrado")
-    messages = repo.get_messages(chat_id, user["sub"])
+    messages = repo.get_messages(chat_id, user["id"])
     return {"chat_id": chat_id, "title": chat["title"], "messages": messages}
 
 
@@ -68,14 +68,14 @@ def update_title(chat_id: str, body: dict, user: dict = Depends(require_auth)):
     title = body.get("title", "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="El título no puede estar vacío")
-    repo.update_chat_title(chat_id, user["sub"], title)
+    repo.update_chat_title(chat_id, user["id"], title)
     return {"ok": True}
 
 
 @router.delete("/{chat_id}")
 def delete_chat(chat_id: str, user: dict = Depends(require_auth)):
     """Elimina un chat y todos sus mensajes."""
-    repo.delete_chat(chat_id, user["sub"])
+    repo.delete_chat(chat_id, user["id"])
     return {"ok": True}
 
 
@@ -87,7 +87,7 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
         # Crear chat si no viene chat_id
         chat_id = body.chat_id
         if not chat_id:
-            new = repo.create_chat(user["sub"])
+            new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
 
         # Guardar el mensaje del usuario
@@ -96,10 +96,10 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
             repo.save_message(chat_id, "user", last_user_msg.content)
 
             # Auto-título con las primeras palabras del primer mensaje
-            chat = repo.get_chat(chat_id, user["sub"])
+            chat = repo.get_chat(chat_id, user["id"])
             if chat and chat["title"] == "Nueva conversación":
                 auto_title = last_user_msg.content[:50].strip()
-                repo.update_chat_title(chat_id, user["sub"], auto_title)
+                repo.update_chat_title(chat_id, user["id"], auto_title)
 
         system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
@@ -135,7 +135,7 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         # Crear chat si no viene chat_id
         chat_id = body.chat_id
         if not chat_id:
-            new = repo.create_chat(user["sub"])
+            new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
 
         # Guardar mensaje del usuario
@@ -143,10 +143,10 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         if last_user_msg and last_user_msg.role == "user":
             repo.save_message(chat_id, "user", last_user_msg.content)
 
-            chat = repo.get_chat(chat_id, user["sub"])
+            chat = repo.get_chat(chat_id, user["id"])
             if chat and chat["title"] == "Nueva conversación":
                 auto_title = last_user_msg.content[:50].strip()
-                repo.update_chat_title(chat_id, user["sub"], auto_title)
+                repo.update_chat_title(chat_id, user["id"], auto_title)
 
         system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
