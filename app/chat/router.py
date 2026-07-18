@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from app.core.jwt import require_auth
+from app.voice.factory import get_voice_provider
 from app.llm.factory import get_llm_provider
 from app.context.provider import get_hash_sources
 from app.compiler.base_compiler import compile_base_context
@@ -19,6 +20,10 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[Message]
     provider: str | None = None
+
+
+class SynthesizeRequest(BaseModel):
+    text: str
 
 
 def _build_system_prompt() -> str:
@@ -109,6 +114,19 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
                 "X-Accel-Buffering": "no",
             },
         )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/synthesize")
+def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
+    try:
+        voice = get_voice_provider()
+        audio = voice.synthesize(body.text)
+        return Response(content=audio, media_type="audio/mpeg")
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
