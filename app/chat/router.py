@@ -130,3 +130,27 @@ def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/synthesize/stream")
+def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
+    try:
+        voice = get_voice_provider()
+
+        def audio_chunks():
+            try:
+                for chunk in voice.synthesize_stream(body.text):
+                    yield chunk
+            except Exception as e:
+                print(f"Error en stream de audio: {e}")
+
+        return StreamingResponse(
+            audio_chunks(),
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
