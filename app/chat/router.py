@@ -1,30 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse, Response
-from pydantic import BaseModel
 from app.core.jwt import require_auth
 from app.voice.factory import get_voice_provider
 from app.llm.factory import get_llm_provider
 from app.context.provider import get_hash_sources
 from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
+from app.chat.models import ChatRequest, SynthesizeRequest
+import app.chat.repository as repo
 import traceback
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-
-
-class Message(BaseModel):
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: list[Message]
-    provider: str | None = None
-
-
-class SynthesizeRequest(BaseModel):
-    text: str
-    voice_id: str | None = None
 
 
 def _build_system_prompt() -> str:
@@ -45,19 +31,80 @@ def _is_quota_error(e: Exception) -> bool:
 
 
 def _get_fallback_provider(provider_name: str):
-    """Devuelve el provider de fallback según el principal."""
     if provider_name != "groq":
         from app.llm.groq import GroqProvider
         return GroqProvider()
     return None
 
 
+# ── Chats CRUD ────────────────────────────────────────────────────────────────
+
+@router.get("/list")
+def list_chats(user: dict = Depends(require_auth)):
+    """Devuelve todos los chats del usuario ordenados por actividad."""
+    return repo.list_chats(user["sub"])
+
+
+@router.post("/new")
+def new_chat(user: dict = Depends(require_auth)):
+    """Crea un chat vacío y devuelve su ID."""
+    chat = repo.create_chat(user["sub"])
+    return chat
+
+
+@router.get("/{chat_id}/messages")
+def get_messages(chat_id: str, user: dict = Depends(require_auth)):
+    """Devuelve el historial de mensajes de un chat."""
+    chat = repo.get_chat(chat_id, user["sub"])
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat no encontrado")
+    messages = repo.get_messages(chat_id, user["sub"])
+    return {"chat_id": chat_id, "title": chat["title"], "messages": messages}
+
+
+@router.patch("/{chat_id}/title")
+def update_title(chat_id: str, body: dict, user: dict = Depends(require_auth)):
+    """Actualiza el título del chat."""
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="El título no puede estar vacío")
+    repo.update_chat_title(chat_id, user["sub"], title)
+    return {"ok": True}
+
+
+@router.delete("/{chat_id}")
+def delete_chat(chat_id: str, user: dict = Depends(require_auth)):
+    """Elimina un chat y todos sus mensajes."""
+    repo.delete_chat(chat_id, user["sub"])
+    return {"ok": True}
+
+
+# ── Chat (enviar mensaje) ─────────────────────────────────────────────────────
+
 @router.post("")
 def chat(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
+        # Crear chat si no viene chat_id
+        chat_id = body.chat_id
+        if not chat_id:
+            new = repo.create_chat(user["sub"])
+            chat_id = new["chat_id"]
+
+        # Guardar el mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+
+            # Auto-título con las primeras palabras del primer mensaje
+            chat = repo.get_chat(chat_id, user["sub"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["sub"], auto_title)
+
         system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
         llm = get_llm_provider(body.provider)
+
         try:
             reply = llm.generate(messages)
         except RuntimeError as e:
@@ -69,7 +116,12 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
                     raise
             else:
                 raise
-        return {"reply": reply}
+
+        # Guardar respuesta del asistente
+        repo.save_message(chat_id, "assistant", reply)
+
+        return {"reply": reply, "chat_id": chat_id}
+
     except NotImplementedError as e:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
     except Exception as e:
@@ -80,22 +132,41 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
 @router.post("/stream")
 def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
+        # Crear chat si no viene chat_id
+        chat_id = body.chat_id
+        if not chat_id:
+            new = repo.create_chat(user["sub"])
+            chat_id = new["chat_id"]
+
+        # Guardar mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+
+            chat = repo.get_chat(chat_id, user["sub"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["sub"], auto_title)
+
         system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
         llm = get_llm_provider()
 
+        full_reply = []
+
         def event_stream():
             try:
                 for chunk in llm.generate_stream(messages):
+                    full_reply.append(chunk)
                     escaped = chunk.replace("\n", "\\n")
                     yield f"data: {escaped}\n\n"
             except RuntimeError as e:
                 if _is_quota_error(e):
-                    # Fallback a Groq en streaming
                     try:
                         from app.llm.groq import GroqProvider
                         fallback = GroqProvider()
                         for chunk in fallback.generate_stream(messages):
+                            full_reply.append(chunk)
                             escaped = chunk.replace("\n", "\\n")
                             yield f"data: {escaped}\n\n"
                     except Exception as fe:
@@ -105,6 +176,10 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
             except Exception as e:
                 yield f"data: [ERROR] {str(e)}\n\n"
             finally:
+                # Guardar respuesta completa
+                if full_reply:
+                    repo.save_message(chat_id, "assistant", "".join(full_reply))
+                yield f"data: [CHAT_ID] {chat_id}\n\n"
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(
@@ -119,6 +194,8 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+
+# ── Voz ──────────────────────────────────────────────────────────────────────
 
 @router.post("/synthesize")
 def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
