@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import SESSION_SECRET
 from app.core.database import init_db
+from app.chat.repository import ensure_tables
 from app.auth.router import router as auth_router
 from app.context.router import router as context_router
 from app.memory.router import router as memory_router
@@ -35,6 +36,7 @@ app.include_router(chat_router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+    ensure_tables()
 
 
 @app.get("/health")
