@@ -1,6 +1,5 @@
 import os
 import requests
-import ormsgpack
 from app.voice.provider import VoiceProvider
 
 FISH_API_URL = "https://api.fish.audio/v1/tts"
@@ -17,19 +16,18 @@ class FishProvider(VoiceProvider):
             raise RuntimeError("FISH_AUDIO_VOICE_ID no configurada")
 
     def synthesize(self, text: str) -> bytes:
-        payload = {
-            "text": text,
-            "reference_id": self.voice_id,
-            "format": "mp3",
-            "latency": "normal",
-        }
         response = requests.post(
             FISH_API_URL,
-            content=ormsgpack.packb(payload),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/msgpack",
+                "Content-Type": "application/json",
                 "model": "s2.1-pro-free",
+            },
+            json={
+                "text": text,
+                "reference_id": self.voice_id,
+                "format": "mp3",
+                "latency": "normal",
             },
             timeout=30,
         )
