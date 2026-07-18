@@ -22,13 +22,13 @@ class FishProvider(VoiceProvider):
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "model": "s2.1-pro-free",
             },
             json={
                 "text": text,
                 "reference_id": self.voice_id,
                 "format": "mp3",
                 "latency": "low",
+                "model": "s2.1-pro-free",
             },
             timeout=30,
         )
@@ -44,7 +44,6 @@ class FishProvider(VoiceProvider):
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "model": "s2.1-pro-free",
             },
             json={
                 "text": text,
@@ -52,6 +51,7 @@ class FishProvider(VoiceProvider):
                 "format": "mp3",
                 "latency": "balanced",
                 "streaming": True,
+                "model": "s2.1-pro-free",
             },
             timeout=60,
             stream=True,
