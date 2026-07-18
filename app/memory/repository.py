@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from psycopg2.extras import Json
 from app.core.database import get_cursor
+from app.core.encryption import encrypt, decrypt
 
 
 def user_exists(user_id: str) -> bool:
@@ -46,6 +47,9 @@ def get_or_create_document(user_id: str, key: str, name: str, description: str) 
 
 def add_row(document_id: str, data: dict) -> dict:
     created_at = datetime.now(timezone.utc)
+    encrypted_data = {**data}
+    if "message" in encrypted_data:
+        encrypted_data["message"] = encrypt(encrypted_data["message"])
     with get_cursor() as cur:
         cur.execute(
             """
@@ -53,7 +57,7 @@ def add_row(document_id: str, data: dict) -> dict:
             VALUES (%s, %s, %s)
             RETURNING id;
             """,
-            (document_id, Json(data), created_at),
+            (document_id, Json(encrypted_data), created_at),
         )
     return {**data, "created_at": created_at.isoformat()}
 
@@ -113,7 +117,7 @@ def get_documents_with_rows(user_id: str) -> list[dict]:
                 "description": doc["description"],
                 "created_at": doc["created_at"].isoformat(),
                 "rows": [
-                    {**r["data"], "created_at": r["created_at"].isoformat()}
+                    {**{k: (decrypt(v) if k == "message" else v) for k, v in r["data"].items()}, "created_at": r["created_at"].isoformat()}
                     for r in rows
                 ],
             })
