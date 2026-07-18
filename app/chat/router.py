@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
 
 class SynthesizeRequest(BaseModel):
     text: str
+    voice_id: str | None = None
 
 
 def _build_system_prompt() -> str:
@@ -123,7 +124,7 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
 def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
         voice = get_voice_provider()
-        audio = voice.synthesize(body.text)
+        audio = voice.synthesize(body.text, voice_id=body.voice_id)
         return Response(content=audio, media_type="audio/mpeg")
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
@@ -139,7 +140,7 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
 
         def audio_chunks():
             try:
-                for chunk in voice.synthesize_stream(body.text):
+                for chunk in voice.synthesize_stream(body.text, voice_id=body.voice_id):
                     yield chunk
             except Exception as e:
                 print(f"Error en stream de audio: {e}")

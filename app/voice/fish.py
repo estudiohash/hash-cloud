@@ -15,7 +15,7 @@ class FishProvider(VoiceProvider):
         if not self.voice_id:
             raise RuntimeError("FISH_AUDIO_VOICE_ID no configurada")
 
-    def synthesize(self, text: str) -> bytes:
+    def synthesize(self, text: str, voice_id: str | None = None) -> bytes:
         """Sin streaming — mantener por compatibilidad."""
         response = requests.post(
             FISH_API_URL,
@@ -26,7 +26,7 @@ class FishProvider(VoiceProvider):
             },
             json={
                 "text": text,
-                "reference_id": self.voice_id,
+                "reference_id": voice_id or self.voice_id,
                 "format": "mp3",
                 "latency": "normal",
             },
@@ -37,7 +37,7 @@ class FishProvider(VoiceProvider):
             raise RuntimeError(f"Fish Audio error {response.status_code}: {response.text}")
         return response.content
 
-    def synthesize_stream(self, text: str):
+    def synthesize_stream(self, text: str, voice_id: str | None = None):
         """Genera audio en streaming, yield de chunks binarios."""
         response = requests.post(
             FISH_API_URL,
@@ -48,7 +48,7 @@ class FishProvider(VoiceProvider):
             },
             json={
                 "text": text,
-                "reference_id": self.voice_id,
+                "reference_id": voice_id or self.voice_id,
                 "format": "mp3",
                 "latency": "balanced",
                 "streaming": True,
