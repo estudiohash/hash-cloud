@@ -118,3 +118,36 @@ def get_documents_with_rows(user_id: str) -> list[dict]:
                 ],
             })
         return result
+
+
+def delete_document(user_id: str, key: str) -> bool:
+    """Elimina el documento y todas sus filas. Devuelve True si existía."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT id FROM memory_documents WHERE user_id = %s AND key = %s;",
+            (user_id, key),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        doc_id = row["id"]
+        cur.execute("DELETE FROM memory_rows WHERE document_id = %s;", (doc_id,))
+        cur.execute("DELETE FROM memory_documents WHERE id = %s;", (doc_id,))
+        return True
+
+
+def rename_document(user_id: str, key: str, new_name: str) -> bool:
+    """Renombra el documento (name y key). Devuelve True si existía."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT id FROM memory_documents WHERE user_id = %s AND key = %s;",
+            (user_id, key),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        cur.execute(
+            "UPDATE memory_documents SET name = %s, key = %s WHERE id = %s;",
+            (new_name, new_name, row["id"]),
+        )
+        return True

@@ -5,7 +5,7 @@ from authlib.integrations.starlette_client import OAuth
 from app.core.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 from app.core.jwt import require_auth, decode_token
 from jwt import ExpiredSignatureError, InvalidTokenError
-from app.memory.service import check_memory_status, create_user_memory, read_user_memory, write_user_memory
+from app.memory.service import check_memory_status, create_user_memory, read_user_memory, write_user_memory, delete_user_document, rename_user_document
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -96,3 +96,29 @@ def memory_write(body: WriteMemoryRequest, user: dict = Depends(require_auth)):
         return write_user_memory(user["id"], body.document, body.name, body.description, body.row)
     except ValueError as e:
         _raise_memory_error(str(e))
+
+
+class RenameMemoryRequest(BaseModel):
+    name: str
+
+
+@router.delete("/{key}")
+def memory_delete(key: str, user: dict = Depends(require_auth)):
+    try:
+        found = delete_user_document(user["id"], key)
+    except ValueError as e:
+        _raise_memory_error(str(e))
+    if not found:
+        _raise_memory_error("not_found")
+    return {"deleted": True, "key": key}
+
+
+@router.patch("/{key}/rename")
+def memory_rename(key: str, body: RenameMemoryRequest, user: dict = Depends(require_auth)):
+    try:
+        found = rename_user_document(user["id"], key, body.name)
+    except ValueError as e:
+        _raise_memory_error(str(e))
+    if not found:
+        _raise_memory_error("not_found")
+    return {"renamed": True, "key": key, "new_name": body.name}

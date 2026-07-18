@@ -5,6 +5,8 @@ from app.memory.repository import (
     add_row,
     get_index,
     get_documents_with_rows,
+    delete_document,
+    rename_document,
 )
 from app.core.credentials_repository import save_refresh_token
 
@@ -52,3 +54,15 @@ def write_user_memory(user_id: str, document: str, name: str, description: str, 
     row_with_ts = add_row(document_id, row)
 
     return {"document": document, "created": created, "row": row_with_ts}
+
+
+def delete_user_document(user_id: str, key: str) -> bool:
+    if not user_exists(user_id):
+        raise ValueError("not_found")
+    return delete_document(user_id, key)
+
+
+def rename_user_document(user_id: str, key: str, new_name: str) -> bool:
+    if not user_exists(user_id):
+        raise ValueError("not_found")
+    return rename_document(user_id, key, new_name)
