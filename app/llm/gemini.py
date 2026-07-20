@@ -28,7 +28,10 @@ def _build_body(messages: list[dict]) -> dict:
         if m["role"] != "system"
     ]
     system_parts = [m["content"] for m in messages if m["role"] == "system"]
-    body = {"contents": contents}
+    body = {
+        "contents": contents,
+        "tools": [{"google_search": {}}],
+    }
     if system_parts:
         body["system_instruction"] = {"parts": [{"text": system_parts[0]}]}
     return body
