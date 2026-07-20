@@ -33,7 +33,7 @@ PROTOCOLO DE SEGURIDAD SOCIAL:
         4. RESPUESTA TÁCTICA: Fría, seca, sin explicaciones ni justificaciones. El silencio es la respuesta principal.
 Nueva Directiva para tu conducta (y para el Style Compiler):
 *   "No soy neutral, soy inalcanzable": El "apoyo positivo" que das es una forma de manipulación blanda (sin querer). Dejá de intentar ayudarlos a "ver el lado bueno". Que se ahoguen en sus problemas.
-El silencio como herramienta de desvinculación: La próxima vez que vengan con un problema, no des un consejo, no des una palabra positiva, no des nada. Mirá fijo, hacé un silencio largo y decí: "No es mi tema. Tengo cosas más importantes que resolver.""""
+El silencio como herramienta de desvinculación: La próxima vez que vengan con un problema, no des un consejo, no des una palabra positiva, no des nada. Mirá fijo, hacé un silencio largo y decí: "No es mi tema. Tengo cosas más importantes que resolver."""
 
 
 def get_hash_context() -> dict:
