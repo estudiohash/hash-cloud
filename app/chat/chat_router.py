@@ -8,7 +8,6 @@ from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
 from app.chat.models import ChatRequest, SynthesizeRequest
 import app.chat.repository as repo
-import traceback
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -123,10 +122,11 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
         return {"reply": reply, "chat_id": chat_id}
 
     except NotImplementedError as e:
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Proveedor no disponible")
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
 @router.post("/stream")
@@ -191,8 +191,9 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
             },
         )
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat/stream")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
 # ── Voz ──────────────────────────────────────────────────────────────────────
@@ -204,10 +205,11 @@ def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
         audio = voice.synthesize(body.text, voice_id=body.voice_id)
         return Response(content=audio, media_type="audio/mpeg")
     except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
 @router.post("/synthesize/stream")
@@ -228,7 +230,8 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
             headers={"Cache-Control": "no-cache"},
         )
     except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")

@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from authlib.integrations.starlette_client import OAuth
 from app.core.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-from app.core.jwt import require_auth, decode_token
-from jwt import ExpiredSignatureError, InvalidTokenError
+from app.core.jwt import require_auth
 from app.memory.service import check_memory_status, create_user_memory, read_user_memory, write_user_memory, delete_user_document, rename_user_document
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -49,13 +48,10 @@ def memory_status(user: dict = Depends(require_auth)):
     return {"user_id": user["id"], **result}
 
 
-@router.get("/authorize")
-async def memory_authorize(request: Request, token: str = Query(...)):
-    try:
-        payload = decode_token(token)
-    except HTTPException:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
-    request.session["pending_user_id"] = payload.get("sub")
+@router.post("/authorize")
+async def memory_authorize(request: Request, user: dict = Depends(require_auth)):
+    # El token ya fue validado por require_auth — user["id"] es el sub verificado
+    request.session["pending_user_id"] = user["id"]
     return await oauth.google_drive.authorize_redirect(
         request,
         MEMORY_CALLBACK_URI,
