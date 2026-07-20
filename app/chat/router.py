@@ -17,6 +17,7 @@ def _build_system_prompt() -> str:
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
     return (
+        f"Fecha y hora actual: {base_context['fecha_actual']}\n\n"
         f"Identidad de HASH:\n{base_context['sources']['cognitive_base']}\n\n"
         f"Log personal:\n{base_context['sources']['personal_log']}\n\n"
         f"Destilador:\n{base_context['sources']['destilador']}\n\n"
