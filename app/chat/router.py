@@ -106,6 +106,13 @@ def list_chats(user: dict = Depends(require_auth)):
 @router.post("/new")
 def new_chat(user: dict = Depends(require_auth)):
     """Crea un chat vacío y devuelve su ID."""
+    # Límite plan free: 6 chats
+    from app.core.database import get_cursor
+    with get_cursor() as cur:
+        cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+        row = cur.fetchone()
+        if row and row["total"] >= 6:
+            raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
     chat = repo.create_chat(user["id"])
     return chat
 

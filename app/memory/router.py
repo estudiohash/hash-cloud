@@ -128,6 +128,15 @@ from app.memory.service import upload_txt_as_memory
 async def upload_txt(file: UploadFile = File(...), user: dict = Depends(require_auth)):
     if not file.filename.endswith(".txt"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
+
+    # Límite plan free: 3 documentos
+    from app.core.database import get_cursor
+    with get_cursor() as cur:
+        cur.execute("SELECT COUNT(*) as total FROM memory_documents WHERE user_id = %s", [user["id"]])
+        row = cur.fetchone()
+        if row and row["total"] >= 3:
+            raise HTTPException(status_code=403, detail="Límite de documentos alcanzado (plan free: 3)")
+
     content = await file.read()
     try:
         text = content.decode("utf-8")
