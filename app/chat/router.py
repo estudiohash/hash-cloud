@@ -139,7 +139,17 @@ def update_title(chat_id: str, body: dict, user: dict = Depends(require_auth)):
 
 @router.delete("/{chat_id}")
 def delete_chat(chat_id: str, user: dict = Depends(require_auth)):
-    """Elimina un chat y todos sus mensajes."""
+    """Elimina un chat, todos sus mensajes y sus documentos de memoria."""
+    with get_cursor() as cur:
+        cur.execute("""
+            DELETE FROM memory_rows WHERE document_id IN (
+                SELECT id FROM memory_documents WHERE user_id = %s AND chat_id = %s
+            )
+        """, [user["id"], chat_id])
+        cur.execute(
+            "DELETE FROM memory_documents WHERE user_id = %s AND chat_id = %s",
+            [user["id"], chat_id]
+        )
     repo.delete_chat(chat_id, user["id"])
     return {"ok": True}
 
