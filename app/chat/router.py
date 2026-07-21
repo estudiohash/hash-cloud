@@ -6,35 +6,18 @@ from app.llm.factory import get_llm_provider
 from app.context.provider import get_hash_sources
 from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
-from app.compiler.user_compiler import compile_user_context
-from app.memory.service import read_user_memory
 from app.chat.models import ChatRequest, SynthesizeRequest
 import app.chat.repository as repo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def _build_system_prompt(user_id: str) -> str:
+def _build_system_prompt() -> str:
     sources = get_hash_sources()
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
-
-    memory_raw = read_user_memory(user_id)
-    memory_text = ""
-    if memory_raw and memory_raw.get("documents"):
-        blocks = []
-        for doc in memory_raw["documents"]:
-            rows = doc.get("rows", [])
-            if rows:
-                lines = "\n".join(r.get("message", "") for r in rows if r.get("message"))
-                blocks.append(f"[{doc['name']}]\n{lines}")
-        if blocks:
-            memory_text = "\n\n".join(blocks)
-
     return (
-        f"Fecha y hora actual: {base_context['fecha_actual']}\n\n"
-        + (f"Memoria del usuario:\n{memory_text}\n\n" if memory_text else "")
-        + f"Identidad de HASH:\n{base_context['sources']['cognitive_base']}\n\n"
+        f"Identidad de HASH:\n{base_context['sources']['cognitive_base']}\n\n"
         f"Log personal:\n{base_context['sources']['personal_log']}\n\n"
         f"Destilador:\n{base_context['sources']['destilador']}\n\n"
         f"Estilo:\n{style_context['sources']['style']}"
@@ -117,7 +100,7 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
                 auto_title = last_user_msg.content[:50].strip()
                 repo.update_chat_title(chat_id, user["id"], auto_title)
 
-        system_prompt = _build_system_prompt(user["id"])
+        system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
         llm = get_llm_provider(body.provider)
 
@@ -165,7 +148,7 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
                 auto_title = last_user_msg.content[:50].strip()
                 repo.update_chat_title(chat_id, user["id"], auto_title)
 
-        system_prompt = _build_system_prompt(user["id"])
+        system_prompt = _build_system_prompt()
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
         llm = get_llm_provider()
 
@@ -252,4 +235,3 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
         import logging
         logging.getLogger(__name__).exception("Error en synthesize")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
-
