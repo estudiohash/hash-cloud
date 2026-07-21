@@ -17,48 +17,50 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
-    """Busca en memory_rows las filas más relevantes al query por palabras clave."""
+    """Busca en memory_rows desencriptando primero, luego filtrando por palabras clave."""
     words = [w.strip() for w in query.split() if len(w.strip()) > 3]
     if not words:
         return ""
     try:
         with get_cursor() as cur:
-            conditions = " OR ".join(["mr.data::text ILIKE %s"] * len(words))
-            params = [f"%{w}%" for w in words] + [user_id, limit]
-            cur.execute(f"""
+            cur.execute("""
                 SELECT md.name, mr.data
                 FROM memory_rows mr
                 JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s AND ({conditions})
+                WHERE md.user_id = %s
                 ORDER BY mr.created_at DESC
-                LIMIT %s
-            """, [user_id] + [f"%{w}%" for w in words] + [limit])
+                LIMIT 200
+            """, [user_id])
             rows = cur.fetchall()
         if not rows:
             return ""
         lines = []
         for r in rows:
             msg = r["data"].get("message", "")
-            if msg:
-                try:
-                    msg = decrypt(msg)
-                except Exception:
-                    pass
-                # Extraer ventana de 400 chars alrededor de la primera coincidencia
-                lower_msg = msg.lower()
-                pos = -1
-                for w in words:
-                    p = lower_msg.find(w.lower())
-                    if p != -1:
-                        pos = p
-                        break
-                if pos != -1:
-                    start = max(0, pos - 200)
-                    end = min(len(msg), pos + 200)
-                    fragment = msg[start:end].strip()
-                else:
-                    fragment = msg[:400].strip()
-                lines.append(f"[{r['name']}]\n{fragment}")
+            if not msg:
+                continue
+            try:
+                msg = decrypt(msg)
+            except Exception:
+                pass
+            lower_msg = msg.lower()
+            if not any(w.lower() in lower_msg for w in words):
+                continue
+            pos = -1
+            for w in words:
+                p = lower_msg.find(w.lower())
+                if p != -1:
+                    pos = p
+                    break
+            if pos != -1:
+                start = max(0, pos - 200)
+                end = min(len(msg), pos + 200)
+                fragment = msg[start:end].strip()
+            else:
+                fragment = msg[:400].strip()
+            lines.append(f"[{r['name']}]\n{fragment}")
+            if len(lines) >= limit:
+                break
         return "\n\n".join(lines)
     except Exception:
         return ""
