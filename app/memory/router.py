@@ -1,120 +1,252 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-from authlib.integrations.starlette_client import OAuth
-from app.core.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse, Response
 from app.core.jwt import require_auth
-from app.memory.service import check_memory_status, create_user_memory, read_user_memory, write_user_memory, delete_user_document, rename_user_document
+from app.voice.factory import get_voice_provider
+from app.llm.factory import get_llm_provider
+from app.context.provider import get_hash_sources
+from app.compiler.base_compiler import compile_base_context
+from app.compiler.style_compiler import compile_style_context
+from app.chat.models import ChatRequest, SynthesizeRequest
+import app.chat.repository as repo
 
-router = APIRouter(prefix="/memory", tags=["memory"])
-
-import os
-MEMORY_CALLBACK_URI = os.environ.get("MEMORY_CALLBACK_URI", "https://hash-cloud-production.up.railway.app/memory/callback")
-
-oauth = OAuth()
-oauth.register(
-    name="google_drive",
-    client_id=GOOGLE_CLIENT_ID,
-    client_secret=GOOGLE_CLIENT_SECRET,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={
-        "scope": "https://www.googleapis.com/auth/drive.file",
-        "token_endpoint_auth_method": "client_secret_post",
-    },
-)
-
-MEMORY_ERRORS = {
-    "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
-    "unauthorized":  (status.HTTP_401_UNAUTHORIZED, "Acceso revocado. El usuario debe reautorizar."),
-    "inaccessible":  (status.HTTP_403_FORBIDDEN,   "El documento de memoria no es accesible. Verificá que exista en Google Drive."),
-}
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def _raise_memory_error(error: str):
-    code, detail = MEMORY_ERRORS.get(error, (500, "Error inesperado"))
-    raise HTTPException(status_code=code, detail=detail)
-
-
-class WriteMemoryRequest(BaseModel):
-    document: str
-    name: str
-    description: str
-    row: dict
-
-
-@router.get("/status")
-def memory_status(user: dict = Depends(require_auth)):
-    result = check_memory_status(user["id"])
-    return {"user_id": user["id"], **result}
-
-
-@router.post("/authorize")
-async def memory_authorize(request: Request, user: dict = Depends(require_auth)):
-    # El token ya fue validado por require_auth — user["id"] es el sub verificado
-    request.session["pending_user_id"] = user["id"]
-    return await oauth.google_drive.authorize_redirect(
-        request,
-        MEMORY_CALLBACK_URI,
-        access_type="offline",
-        prompt="consent",
+def _build_system_prompt() -> str:
+    sources = get_hash_sources()
+    base_context = compile_base_context(sources)
+    style_context = compile_style_context(sources)
+    return (
+        f"Identidad de HASH:\n{base_context['sources']['cognitive_base']}\n\n"
+        f"Log personal:\n{base_context['sources']['personal_log']}\n\n"
+        f"Destilador:\n{base_context['sources']['destilador']}\n\n"
+        f"Estilo:\n{style_context['sources']['style']}"
     )
 
 
-@router.get("/callback")
-async def memory_callback(request: Request):
-    token = await oauth.google_drive.authorize_access_token(request)
-    user_id = request.session.get("pending_user_id")
-
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sesión inválida")
-
-    refresh_token = token.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token no recibido")
-
-    create_user_memory(user_id, token["access_token"], refresh_token)
-    return RedirectResponse(url="https://hash-ai.vercel.app/")
+def _is_quota_error(e: Exception) -> bool:
+    msg = str(e)
+    return "429" in msg or "503" in msg or "fallaron" in msg
 
 
-@router.get("")
-def memory_read(user: dict = Depends(require_auth)):
-    result = read_user_memory(user["id"])
-    if result is None:
-        _raise_memory_error("not_found")
-    if "error" in result:
-        _raise_memory_error(result["error"])
-    return result
+def _get_fallback_provider(provider_name: str):
+    if provider_name != "groq":
+        from app.llm.groq import GroqProvider
+        return GroqProvider()
+    return None
 
+
+# ── Chats CRUD ────────────────────────────────────────────────────────────────
+
+@router.get("/list")
+def list_chats(user: dict = Depends(require_auth)):
+    """Devuelve todos los chats del usuario ordenados por actividad."""
+    return repo.list_chats(user["id"])
+
+
+@router.post("/new")
+def new_chat(user: dict = Depends(require_auth)):
+    """Crea un chat vacío y devuelve su ID."""
+    chat = repo.create_chat(user["id"])
+    return chat
+
+
+@router.get("/{chat_id}/messages")
+def get_messages(chat_id: str, user: dict = Depends(require_auth)):
+    """Devuelve el historial de mensajes de un chat."""
+    chat = repo.get_chat(chat_id, user["id"])
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat no encontrado")
+    messages = repo.get_messages(chat_id, user["id"])
+    return {"chat_id": chat_id, "title": chat["title"], "messages": messages}
+
+
+@router.patch("/{chat_id}/title")
+def update_title(chat_id: str, body: dict, user: dict = Depends(require_auth)):
+    """Actualiza el título del chat."""
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="El título no puede estar vacío")
+    repo.update_chat_title(chat_id, user["id"], title)
+    return {"ok": True}
+
+
+@router.delete("/{chat_id}")
+def delete_chat(chat_id: str, user: dict = Depends(require_auth)):
+    """Elimina un chat y todos sus mensajes."""
+    repo.delete_chat(chat_id, user["id"])
+    return {"ok": True}
+
+
+# ── Chat (enviar mensaje) ─────────────────────────────────────────────────────
 
 @router.post("")
-def memory_write(body: WriteMemoryRequest, user: dict = Depends(require_auth)):
+def chat(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
-        return write_user_memory(user["id"], body.document, body.name, body.description, body.row)
-    except ValueError as e:
-        _raise_memory_error(str(e))
+        # Crear chat si no viene chat_id
+        chat_id = body.chat_id
+        if not chat_id:
+            new = repo.create_chat(user["id"])
+            chat_id = new["chat_id"]
+
+        # Guardar el mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+
+            # Auto-título con las primeras palabras del primer mensaje
+            chat = repo.get_chat(chat_id, user["id"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["id"], auto_title)
+
+        system_prompt = _build_system_prompt()
+        messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
+        llm = get_llm_provider(body.provider)
+
+        try:
+            reply = llm.generate(messages)
+        except RuntimeError as e:
+            if _is_quota_error(e):
+                fallback = _get_fallback_provider(llm.__class__.__name__.lower().replace("provider", ""))
+                if fallback:
+                    reply = fallback.generate(messages)
+                else:
+                    raise
+            else:
+                raise
+
+        # Guardar respuesta del asistente
+        repo.save_message(chat_id, "assistant", reply)
+
+        return {"reply": reply, "chat_id": chat_id}
+
+    except NotImplementedError as e:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Proveedor no disponible")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-class RenameMemoryRequest(BaseModel):
-    name: str
-
-
-@router.delete("/{key}")
-def memory_delete(key: str, user: dict = Depends(require_auth)):
+@router.post("/stream")
+def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
-        found = delete_user_document(user["id"], key)
-    except ValueError as e:
-        _raise_memory_error(str(e))
-    if not found:
-        _raise_memory_error("not_found")
-    return {"deleted": True, "key": key}
+        # Crear chat si no viene chat_id
+        chat_id = body.chat_id
+        if not chat_id:
+            new = repo.create_chat(user["id"])
+            chat_id = new["chat_id"]
+
+        # Guardar mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+
+            chat = repo.get_chat(chat_id, user["id"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["id"], auto_title)
+
+        system_prompt = _build_system_prompt()
+        messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
+        llm = get_llm_provider()
+
+        full_reply = []
+
+        def event_stream():
+            try:
+                for chunk in llm.generate_stream(messages):
+                    full_reply.append(chunk)
+                    escaped = chunk.replace("\n", "\\n")
+                    yield f"data: {escaped}\n\n"
+            except RuntimeError as e:
+                if _is_quota_error(e):
+                    try:
+                        from app.llm.groq import GroqProvider
+                        fallback = GroqProvider()
+                        for chunk in fallback.generate_stream(messages):
+                            full_reply.append(chunk)
+                            escaped = chunk.replace("\n", "\\n")
+                            yield f"data: {escaped}\n\n"
+                    except Exception as fe:
+                        yield f"data: [ERROR] {str(fe)}\n\n"
+                else:
+                    yield f"data: [ERROR] {str(e)}\n\n"
+            except Exception as e:
+                yield f"data: [ERROR] {str(e)}\n\n"
+            finally:
+                # Guardar respuesta completa
+                if full_reply:
+                    repo.save_message(chat_id, "assistant", "".join(full_reply))
+                yield f"data: [CHAT_ID] {chat_id}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat/stream")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-@router.patch("/{key}/rename")
-def memory_rename(key: str, body: RenameMemoryRequest, user: dict = Depends(require_auth)):
+# ── Voz ──────────────────────────────────────────────────────────────────────
+
+@router.post("/synthesize")
+def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
-        found = rename_user_document(user["id"], key, body.name)
-    except ValueError as e:
-        _raise_memory_error(str(e))
-    if not found:
-        _raise_memory_error("not_found")
-    return {"renamed": True, "key": key, "new_name": body.name}
+        voice = get_voice_provider()
+        audio = voice.synthesize(body.text, voice_id=body.voice_id)
+        return Response(content=audio, media_type="audio/mpeg")
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
+
+
+@router.post("/synthesize/stream")
+def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
+    try:
+        voice = get_voice_provider()
+
+        def audio_chunks():
+            try:
+                for chunk in voice.synthesize_stream(body.text, voice_id=body.voice_id):
+                    yield chunk
+            except Exception as e:
+                print(f"Error en stream de audio: {e}")
+
+        return StreamingResponse(
+            audio_chunks(),
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
+
+@router.post("/upload-txt")
+async def upload_txt(file: UploadFile = File(...), user: dict = Depends(require_auth)):
+    """Sube un archivo .txt y lo guarda como documento de memoria del usuario."""
+    if not file.filename.endswith(".txt"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
+    
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8")
+
+    result = upload_txt_as_memory(user["id"], file.filename, text)
+    return result
