@@ -199,7 +199,7 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
 @router.post("/stream")
 def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
-        # Crear chat si no viene chat_id
+        # Límite plan free: 6 chats (antes de entrar al stream)
         chat_id = body.chat_id
         if not chat_id:
             from app.core.database import get_cursor
@@ -264,6 +264,8 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
                 "X-Accel-Buffering": "no",
             },
         )
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("Error en /chat/stream")
