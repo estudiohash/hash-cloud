@@ -68,7 +68,7 @@ def rename_user_document(user_id: str, key: str, new_name: str) -> bool:
     return rename_document(user_id, key, new_name)
 
 
-def upload_txt_as_memory(user_id: str, filename: str, content: str) -> dict:
+def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str | None = None) -> dict:
     if not user_exists(user_id):
         create_user(user_id)
 
@@ -78,7 +78,7 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str) -> dict:
     name = filename.replace(".txt", "")
     description = f"Cargado desde archivo: {filename}"
 
-    document_id, created = get_or_create_document(user_id, key, name, description)
+    document_id, created = get_or_create_document(user_id, key, name, description, chat_id=chat_id)
 
     # Guardar el contenido completo como un solo bloque
     add_row(document_id, {"message": content.strip()})

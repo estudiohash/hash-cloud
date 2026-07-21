@@ -22,7 +22,7 @@ def create_user(user_id: str) -> None:
         )
 
 
-def get_or_create_document(user_id: str, key: str, name: str, description: str) -> tuple[str, bool]:
+def get_or_create_document(user_id: str, key: str, name: str, description: str, chat_id: str | None = None) -> tuple[str, bool]:
     """Devuelve (document_id, created). created=True si se acaba de crear."""
     with get_cursor() as cur:
         cur.execute(
@@ -35,11 +35,11 @@ def get_or_create_document(user_id: str, key: str, name: str, description: str) 
 
         cur.execute(
             """
-            INSERT INTO memory_documents (user_id, key, name, description, created_at)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO memory_documents (user_id, key, name, description, created_at, chat_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id;
             """,
-            (user_id, key, name, description, datetime.now(timezone.utc)),
+            (user_id, key, name, description, datetime.now(timezone.utc), chat_id),
         )
         new_id = cur.fetchone()["id"]
         return str(new_id), True
