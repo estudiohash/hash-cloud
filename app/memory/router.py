@@ -118,3 +118,19 @@ def memory_rename(key: str, body: RenameMemoryRequest, user: dict = Depends(requ
     if not found:
         _raise_memory_error("not_found")
     return {"renamed": True, "key": key, "new_name": body.name}
+
+
+from fastapi import UploadFile, File
+from app.memory.service import upload_txt_as_memory
+
+
+@router.post("/upload-txt")
+async def upload_txt(file: UploadFile = File(...), user: dict = Depends(require_auth)):
+    if not file.filename.endswith(".txt"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8")
+    return upload_txt_as_memory(user["id"], file.filename, text)

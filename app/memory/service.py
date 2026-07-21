@@ -66,3 +66,20 @@ def rename_user_document(user_id: str, key: str, new_name: str) -> bool:
     if not user_exists(user_id):
         raise ValueError("not_found")
     return rename_document(user_id, key, new_name)
+
+
+def upload_txt_as_memory(user_id: str, filename: str, content: str) -> dict:
+    if not user_exists(user_id):
+        create_user(user_id)
+
+    key = filename.replace(".txt", "").replace(" ", "_").lower()
+    name = filename.replace(".txt", "")
+    description = f"Cargado desde archivo: {filename}"
+
+    document_id, created = get_or_create_document(user_id, key, name, description)
+
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    for line in lines:
+        add_row(document_id, {"message": line})
+
+    return {"document": key, "created": created, "rows_added": len(lines)}
