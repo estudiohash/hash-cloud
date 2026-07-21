@@ -19,7 +19,6 @@ def _build_system_prompt(user_id: str) -> str:
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
 
-    # Memoria del usuario desde Postgres
     memory_raw = read_user_memory(user_id)
     memory_text = ""
     if memory_raw and memory_raw.get("documents"):
@@ -253,3 +252,4 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
         import logging
         logging.getLogger(__name__).exception("Error en synthesize")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
+
