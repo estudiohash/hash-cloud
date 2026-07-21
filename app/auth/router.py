@@ -71,3 +71,16 @@ async def exchange_code(body: dict):
 @router.get("/me")
 def me(user: dict = Depends(require_auth)):
     return user
+
+
+@router.post("/test-activate-plan")
+def test_activate_plan(user: dict = Depends(require_auth)):
+    """Solo para testing — activa el plan pro del usuario logueado."""
+    from app.core.database import get_cursor
+    with get_cursor() as cur:
+        cur.execute("""
+            UPDATE memory_users
+            SET plan = 'pro', plan_activated_at = NOW()
+            WHERE user_id = %s
+        """, [user["id"]])
+    return {"ok": True, "plan": "pro", "user_id": user["id"]}
