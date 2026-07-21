@@ -202,6 +202,12 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         # Crear chat si no viene chat_id
         chat_id = body.chat_id
         if not chat_id:
+            from app.core.database import get_cursor
+            with get_cursor() as cur:
+                cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+                row = cur.fetchone()
+                if row and row["total"] >= 6:
+                    raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
             new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
 
