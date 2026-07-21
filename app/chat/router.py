@@ -44,8 +44,22 @@ def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
                     msg = decrypt(msg)
                 except Exception:
                     pass
-                lines.append(f"[{r['name']}] {msg}")
-        return "\n".join(lines)
+                # Extraer ventana de 400 chars alrededor de la primera coincidencia
+                lower_msg = msg.lower()
+                pos = -1
+                for w in words:
+                    p = lower_msg.find(w.lower())
+                    if p != -1:
+                        pos = p
+                        break
+                if pos != -1:
+                    start = max(0, pos - 200)
+                    end = min(len(msg), pos + 200)
+                    fragment = msg[start:end].strip()
+                else:
+                    fragment = msg[:400].strip()
+                lines.append(f"[{r['name']}]\n{fragment}")
+        return "\n\n".join(lines)
     except Exception:
         return ""
 

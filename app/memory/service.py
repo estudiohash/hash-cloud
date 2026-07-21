@@ -72,14 +72,15 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str) -> dict:
     if not user_exists(user_id):
         create_user(user_id)
 
-    key = filename.replace(".txt", "").replace(" ", "_").lower()
+    import time
+    # Clave única por timestamp para no pisar archivos anteriores del mismo nombre
+    key = filename.replace(".txt", "").replace(" ", "_").lower() + "_" + str(int(time.time()))
     name = filename.replace(".txt", "")
     description = f"Cargado desde archivo: {filename}"
 
     document_id, created = get_or_create_document(user_id, key, name, description)
 
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-    for line in lines:
-        add_row(document_id, {"message": line})
+    # Guardar el contenido completo como un solo bloque
+    add_row(document_id, {"message": content.strip()})
 
-    return {"document": key, "created": created, "rows_added": len(lines)}
+    return {"document": key, "created": created, "rows_added": 1}
