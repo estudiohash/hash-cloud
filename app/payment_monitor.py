@@ -52,10 +52,37 @@ def activate_plan(user_id: str):
         log.error(f"activate_plan error: {e}")
 
 
-def find_user_by_wallet(wallet: str) -> str | None:
-    """Busca usuario que tenga esta wallet registrada (futuro)."""
-    # Por ahora la wallet es única del owner, se activa manualmente por tx memo o email
-    return None
+def find_user_by_email(email: str) -> str | None:
+    """Busca user_id por email."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("SELECT user_id FROM memory_users WHERE email = %s", [email])
+            row = cur.fetchone()
+            return row["user_id"] if row else None
+    except Exception:
+        return None
+
+
+def get_pending_email() -> str | None:
+    """Devuelve el email pendiente de pago más reciente."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("""
+                SELECT email FROM payment_pending
+                ORDER BY created_at DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+            return row["email"] if row else None
+    except Exception:
+        return None
+
+
+def clear_pending_email(email: str):
+    try:
+        with get_cursor() as cur:
+            cur.execute("DELETE FROM payment_pending WHERE email = %s", [email])
+    except Exception as e:
+        log.error(f"clear_pending_email error: {e}")
 
 
 async def check_payments():
@@ -93,7 +120,17 @@ async def check_payments():
             if value >= REQUIRED_AMOUNT:
                 from_addr = tx.get("from", "")
                 log.info(f"Pago detectado: {value/1_000_000} USDT desde {from_addr}")
-                # TODO: mapear from_addr a user_id cuando implementes wallet por usuario
+                email = get_pending_email()
+                if email:
+                    user_id = find_user_by_email(email)
+                    if user_id:
+                        activate_plan(user_id)
+                        clear_pending_email(email)
+                        log.info(f"Plan activado para {email}")
+                    else:
+                        log.warning(f"Email {email} no encontrado en DB")
+                else:
+                    log.warning("Pago detectado pero no hay email pendiente")
 
     except Exception as e:
         log.error(f"check_payments error: {e}")

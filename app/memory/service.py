@@ -22,13 +22,11 @@ def check_memory_status(user_id: str) -> dict:
     return {"status": "active"}
 
 
-def create_user_memory(user_id: str, access_token: str | None = None, refresh_token: str | None = None) -> dict:
+def create_user_memory(user_id: str, access_token: str | None = None, refresh_token: str | None = None, email: str | None = None) -> dict:
     """
     Ya no depende de Drive: crea el usuario directo en Postgres.
-    access_token queda sin uso (se mantiene el parámetro por compatibilidad con el router/auth).
-    Si viene refresh_token, se guarda igual — útil si en el futuro se necesita para otra integración de Google.
     """
-    create_user(user_id)
+    create_user(user_id, email=email)
     if refresh_token:
         save_refresh_token(user_id, refresh_token)
     return {"user_id": user_id}

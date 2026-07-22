@@ -10,15 +10,15 @@ def user_exists(user_id: str) -> bool:
         return cur.fetchone() is not None
 
 
-def create_user(user_id: str) -> None:
+def create_user(user_id: str, email: str | None = None) -> None:
     with get_cursor() as cur:
         cur.execute(
             """
-            INSERT INTO memory_users (user_id, created_at)
-            VALUES (%s, %s)
-            ON CONFLICT (user_id) DO NOTHING;
+            INSERT INTO memory_users (user_id, email, created_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET email = COALESCE(EXCLUDED.email, memory_users.email);
             """,
-            (user_id, datetime.now(timezone.utc)),
+            (user_id, email, datetime.now(timezone.utc)),
         )
 
 
