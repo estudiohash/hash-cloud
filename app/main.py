@@ -11,6 +11,7 @@ from app.memory.router import router as memory_router
 from app.compiler.router import router as compiler_router
 from app.chat.router import router as chat_router
 from app.payment_monitor import monitor_loop
+from app.support_bot import run_bot
 import asyncio
 import logging
 
@@ -33,8 +34,10 @@ async def lifespan(app: FastAPI):
     ensure_tables()
     ensure_payment_tables()
     task = asyncio.create_task(monitor_loop())
+    bot_task = asyncio.create_task(run_bot())
     yield
     task.cancel()
+    bot_task.cancel()
 
 
 app = FastAPI(title="HASH Cloud", lifespan=lifespan)
