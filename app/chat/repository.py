@@ -146,3 +146,17 @@ def get_messages(chat_id: str, user_id: str) -> list[dict]:
             continue
         messages.append({"role": r["role"], "content": content})
     return messages
+
+
+def count_user_messages(user_id: str) -> int:
+    """Cuenta todos los mensajes enviados por el usuario (role=user) en todos sus chats."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) as total
+                FROM chat_messages cm
+                JOIN chats c ON c.chat_id = cm.chat_id
+                WHERE c.user_id = %s AND cm.role = 'user'
+            """, (user_id,))
+            row = cur.fetchone()
+    return row["total"] if row else 0
