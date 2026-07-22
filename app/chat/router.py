@@ -222,7 +222,6 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         # Límite plan free: 6 chats (antes de entrar al stream)
         chat_id = body.chat_id
         if not chat_id:
-            from app.core.database import get_cursor
             with get_cursor() as cur:
                 cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
                 row = cur.fetchone()
