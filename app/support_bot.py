@@ -12,7 +12,7 @@ from app.core.database import get_cursor
 log = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("SUPPORT_BOT_TOKEN")
-ADMIN_CHAT_ID = 826400018
+ADMIN_CHAT_ID = 8264000181
 
 CRITICAL_KEYWORDS = [
     "pagué", "pague", "pago", "usdt", "transferí", "transferi",
@@ -20,7 +20,6 @@ CRITICAL_KEYWORDS = [
     "no funciona", "pro", "activar", "reembolso", "devolución", "devolucion",
 ]
 
-# Estado de la conversación por usuario
 user_states: dict[int, dict] = {}
 
 
@@ -54,12 +53,26 @@ def save_ticket(user_id: int, username: str | None, email: str, message: str, cr
         log.error(f"save_ticket error: {e}")
 
 
+async def forward_photo(context, file_id: str, username: str, user_id: int, state: dict):
+    caption = (
+        f"🆘 *Nuevo ticket de soporte*\n"
+        f"👤 Usuario: @{username} (`{user_id}`)\n"
+        f"📧 Email: `{state['email']}`\n"
+        f"📝 Problema: {state['description']}"
+    )
+    await context.bot.send_photo(
+        chat_id=ADMIN_CHAT_ID,
+        photo=file_id,
+        caption=caption,
+        parse_mode="Markdown"
+    )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
     username = user.username or user.first_name or str(user_id)
 
-    # Inicializar estado
     if user_id not in user_states:
         user_states[user_id] = {
             "state": "waiting_description",
@@ -69,22 +82,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = user_states[user_id]
 
-    # Manejo de foto
+    # Detectar imagen (foto o documento imagen)
+    file_id = None
     if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+    elif update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/"):
+        file_id = update.message.document.file_id
+
+    if file_id:
         if state["state"] == "waiting_screenshot":
-            photo = update.message.photo[-1]
-            caption = (
-                f"🆘 *Nuevo ticket de soporte*\n"
-                f"👤 Usuario: @{username} (`{user_id}`)\n"
-                f"📧 Email: `{state['email']}`\n"
-                f"📝 Problema: {state['description']}"
-            )
-            await context.bot.send_photo(
-                chat_id=ADMIN_CHAT_ID,
-                photo=photo.file_id,
-                caption=caption,
-                parse_mode="Markdown"
-            )
+            await forward_photo(context, file_id, username, user_id, state)
             save_ticket(user_id, username, state["email"], state["description"], is_critical(state["description"]))
             user_states[user_id]["state"] = "done"
             await update.message.reply_text(
@@ -122,7 +129,7 @@ async def run_bot():
     log.info("Support bot iniciado.")
     bot_app = Application.builder().token(TELEGRAM_TOKEN).updater(None).build()
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_message))
+    bot_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_message))
     await bot_app.initialize()
     await bot_app.start()
     offset = None
