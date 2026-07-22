@@ -15,6 +15,8 @@ import app.chat.repository as repo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+FREE_MESSAGE_LIMIT = 10
+
 
 def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
     """Busca en memory_rows desencriptando primero, luego filtrando por palabras clave."""
@@ -165,6 +167,14 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
             new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
 
+        # Límite de mensajes plan free
+        with get_cursor() as cur:
+            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+            u = cur.fetchone()
+        if (not u or u["plan"] == "free"):
+            if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
+
         # Guardar el mensaje del usuario
         last_user_msg = body.messages[-1] if body.messages else None
         if last_user_msg and last_user_msg.role == "user":
@@ -220,6 +230,14 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
                     raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
             new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
+
+        # Límite de mensajes plan free
+        with get_cursor() as cur:
+            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+            u = cur.fetchone()
+        if (not u or u["plan"] == "free"):
+            if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
 
         # Guardar mensaje del usuario
         last_user_msg = body.messages[-1] if body.messages else None
