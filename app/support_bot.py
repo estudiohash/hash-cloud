@@ -20,19 +20,7 @@ CRITICAL_KEYWORDS = [
     "no funciona", "pro", "activar", "reembolso", "devolución", "devolucion",
 ]
 
-SYSTEM_PROMPT = """Sos el bot de soporte de HASH AI, una plataforma de inteligencia artificial.
-Respondé de forma breve, directa y amable en español rioplatense.
-No tenés acceso a los datos del usuario ni sabés quién es.
-Si el usuario menciona cualquier problema, seguí este flujo exacto:
-1. Primero pedile que describa bien el problema si no lo hizo.
-2. Luego pedile su email de registro en HASH.
-3. Luego pedile una captura de pantalla como comprobante.
-4. Una vez que tenés email y captura, confirmale que el caso fue registrado y será revisado en menos de 24 horas.
-Nunca saltees pasos. Nunca inventes datos del usuario."""
-
-
 # Estado de la conversación por usuario
-# Estados: "waiting_description", "waiting_email", "waiting_screenshot", "done"
 user_states: dict[int, dict] = {}
 
 
@@ -66,17 +54,6 @@ def save_ticket(user_id: int, username: str | None, email: str, message: str, cr
         log.error(f"save_ticket error: {e}")
 
 
-def get_ai_response(user_message: str, conversation_history: list) -> str:
-    try:
-        from app.llm.gemini import GeminiProvider
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history + [{"role": "user", "content": user_message}]
-        gemini = GeminiProvider()
-        return gemini.generate(messages)
-    except Exception as e:
-        log.error(f"get_ai_response error: {e}")
-    return "Gracias por escribir. Tu caso fue registrado y lo revisamos pronto."
-
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -88,7 +65,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "state": "waiting_description",
             "description": "",
             "email": "",
-            "history": [],
         }
 
     state = user_states[user_id]
@@ -96,7 +72,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Manejo de foto
     if update.message.photo:
         if state["state"] == "waiting_screenshot":
-            # Reenviar al admin con resumen
             photo = update.message.photo[-1]
             caption = (
                 f"🆘 *Nuevo ticket de soporte*\n"
@@ -113,7 +88,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_ticket(user_id, username, state["email"], state["description"], is_critical(state["description"]))
             user_states[user_id]["state"] = "done"
             await update.message.reply_text(
-                "✅ Listo, recibimos tu caso. Lo revisamos en menos de 24 horas."
+                "✅ Recibimos tu caso. Nuestro equipo lo va a revisar y te vamos a contactar por email en menos de 24 horas."
             )
         else:
             await update.message.reply_text("Primero contame cuál es tu problema.")
@@ -123,33 +98,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text.strip():
         return
 
-    # Flujo por estado
     if state["state"] == "waiting_description":
         state["description"] = text
-        state["history"].append({"role": "user", "content": text})
         state["state"] = "waiting_email"
-        reply = "Anotado. ¿Cuál es el email con el que te registraste en HASH?"
+        await update.message.reply_text("Anotado. ¿Cuál es el email con el que te registraste en HASH?")
 
     elif state["state"] == "waiting_email":
         state["email"] = text
-        state["history"].append({"role": "user", "content": text})
         state["state"] = "waiting_screenshot"
-        reply = "Perfecto. Ahora mandame una captura de pantalla como comprobante."
+        await update.message.reply_text("Perfecto. Mandame una captura de pantalla como comprobante.")
 
     elif state["state"] == "waiting_screenshot":
-        reply = "Necesito la captura de pantalla. Mandala como imagen."
+        await update.message.reply_text("Necesito la captura como imagen, no como texto.")
 
     elif state["state"] == "done":
-        # Conversación libre post-ticket con IA
-        state["history"].append({"role": "user", "content": text})
-        loop = asyncio.get_event_loop()
-        reply = await loop.run_in_executor(None, get_ai_response, text, state["history"])
-        state["history"].append({"role": "assistant", "content": reply})
-
-    else:
-        reply = "Contame cuál es tu problema."
-
-    await update.message.reply_text(reply)
+        await update.message.reply_text(
+            "Tu caso ya fue registrado. Si tenés otro problema escribinos de nuevo."
+        )
 
 
 async def run_bot():
