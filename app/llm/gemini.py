@@ -31,7 +31,6 @@ def _build_body(messages: list[dict]) -> dict:
     body = {"contents": contents}
     if system_parts:
         body["system_instruction"] = {"parts": [{"text": system_parts[0]}]}
-    body["tools"] = [{"google_search": {}}]
     return body
 
 
@@ -84,9 +83,8 @@ class GeminiProvider(LLMProvider):
                             continue
                         chunk = json.loads(line[6:])
                         try:
-                            for part in chunk["candidates"][0]["content"]["parts"]:
-                                if "text" in part:
-                                    yield part["text"]
+                            text = chunk["candidates"][0]["content"]["parts"][0]["text"]
+                            yield text
                         except (KeyError, IndexError):
                             continue
                 return  # éxito, salir del loop de keys
