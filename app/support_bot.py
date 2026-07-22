@@ -1,25 +1,21 @@
 """
 support_bot.py
 Bot de Telegram de soporte para HASH AI.
-- Responde automáticamente con IA (Claude/Gemini via HASH Cloud)
+- Responde automáticamente con IA (Gemini)
 - Detecta casos críticos (pago perdido, sin activación)
 - Guarda toda la conversación en DB para revisión
 """
 import asyncio
 import logging
-import httpx
 import os
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from app.core.database import get_cursor
-from app.core.config import DATABASE_URL
 
 log = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("SUPPORT_BOT_TOKEN")
-HASH_CLOUD_URL = os.getenv("HASH_CLOUD_URL", "https://hash-cloud-production.up.railway.app")
 
-# Palabras clave que marcan un ticket como crítico
 CRITICAL_KEYWORDS = [
     "pagué", "pague", "pago", "usdt", "transferí", "transferi",
     "no se activó", "no se activo", "perdí", "perdi", "plata",
@@ -50,8 +46,7 @@ def ensure_support_tables():
 
 
 def is_critical(text: str) -> bool:
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in CRITICAL_KEYWORDS)
+    return any(kw in text.lower() for kw in CRITICAL_KEYWORDS)
 
 
 def save_ticket(user_id: int, username: str | None, message: str, response: str, critical: bool):
@@ -65,70 +60,45 @@ def save_ticket(user_id: int, username: str | None, message: str, response: str,
         log.error(f"save_ticket error: {e}")
 
 
-async def get_ai_response(user_message: str, conversation_history: list) -> str:
-    """Llama a la API de Anthropic para generar una respuesta de soporte."""
+def get_ai_response(user_message: str, conversation_history: list) -> str:
     try:
-        messages = conversation_history + [{"role": "user", "content": user_message}]
-        async with httpx.AsyncClient(timeout=30) as client:
-            res = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": os.getenv("ANTHROPIC_API_KEY", ""),
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 300,
-                    "system": SYSTEM_PROMPT,
-                    "messages": messages,
-                }
-            )
-            if res.status_code == 200:
-                data = res.json()
-                return data["content"][0]["text"]
+        from app.llm.gemini import GeminiProvider
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history + [{"role": "user", "content": user_message}]
+        gemini = GeminiProvider()
+        return gemini.generate(messages)
     except Exception as e:
         log.error(f"get_ai_response error: {e}")
     return "Gracias por escribir. Tu mensaje fue registrado y lo vamos a revisar pronto."
 
 
-# Historial en memoria por sesión (se limpia al reiniciar)
 conversation_histories: dict[int, list] = {}
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text or ""
-
     if not text.strip():
         return
 
     user_id = user.id
     username = user.username or user.first_name or str(user_id)
 
-    # Mantener historial de la conversación (últimos 10 turnos)
     if user_id not in conversation_histories:
         conversation_histories[user_id] = []
-
     history = conversation_histories[user_id]
 
-    # Detectar si es crítico
     critical = is_critical(text)
 
-    # Obtener respuesta de IA
-    response = await get_ai_response(text, history)
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, get_ai_response, text, history)
 
-    # Actualizar historial
     history.append({"role": "user", "content": text})
     history.append({"role": "assistant", "content": response})
-    # Mantener solo últimos 10 turnos
     if len(history) > 20:
         conversation_histories[user_id] = history[-20:]
 
-    # Guardar en DB
     save_ticket(user_id, username, text, response, critical)
 
-    # Si es crítico, agregar aviso al final
     if critical:
         response += "\n\n⚠️ *Tu caso fue marcado como prioritario.*"
 
@@ -137,7 +107,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_bot():
     ensure_support_tables()
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     log.info("Support bot iniciado.")
-    await app.run_polling(allowed_updates=["message"])
+    bot_app = Application.builder().token(TELEGRAM_TOKEN).updater(None).build()
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    await bot_app.initialize()
+    await bot_app.start()
+    # Polling manual compatible con el event loop de FastAPI
+    offset = None
+    while True:
+        try:
+            updates = await bot_app.bot.get_updates(offset=offset, timeout=10, allowed_updates=["message"])
+            for update in updates:
+                offset = update.update_id + 1
+                await bot_app.process_update(update)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error(f"run_bot polling error: {e}")
+            await asyncio.sleep(5)
+    await bot_app.stop()
+    await bot_app.shutdown()
