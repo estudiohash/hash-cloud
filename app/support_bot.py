@@ -20,6 +20,8 @@ CRITICAL_KEYWORDS = [
     "no funciona", "pro", "activar", "reembolso", "devolución", "devolucion",
 ]
 
+GREETINGS = ["hola", "hi", "hello", "buenas", "hey", "buen dia", "buen día", "buenas tardes", "buenas noches"]
+
 user_states: dict[int, dict] = {}
 
 
@@ -40,6 +42,10 @@ def ensure_support_tables():
 
 def is_critical(text: str) -> bool:
     return any(kw in text.lower() for kw in CRITICAL_KEYWORDS)
+
+
+def is_greeting(text: str) -> bool:
+    return text.strip().lower() in GREETINGS
 
 
 def save_ticket(user_id: int, username: str | None, email: str, message: str, critical: bool):
@@ -75,7 +81,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id not in user_states:
         user_states[user_id] = {
-            "state": "waiting_description",
+            "state": "greeting",
             "description": "",
             "email": "",
         }
@@ -105,7 +111,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text.strip():
         return
 
-    if state["state"] == "waiting_description":
+    if state["state"] == "greeting" or is_greeting(text):
+        user_states[user_id]["state"] = "waiting_description"
+        await update.message.reply_text("¡Hola! Soy el soporte de HASH AI. ¿En qué te puedo ayudar?")
+
+    elif state["state"] == "waiting_description":
         state["description"] = text
         state["state"] = "waiting_email"
         await update.message.reply_text("Anotado. ¿Cuál es el email con el que te registraste en HASH?")
