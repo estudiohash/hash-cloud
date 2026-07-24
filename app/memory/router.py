@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from app.core.jwt import require_auth
-from app.core.database import get_cursor
 from app.memory.service import (
     check_memory_status,
     create_user_memory,
@@ -80,30 +79,13 @@ def memory_rename(key: str, body: RenameMemoryRequest, user: dict = Depends(requ
     return {"renamed": True, "key": key, "new_name": body.name}
 
 
-@router.post("/upload-txt")
-async def upload_txt(
+@router.post("/upload")
+async def upload_memory(
     file: UploadFile = File(...),
     user: dict = Depends(require_auth),
-    chat_id: str = Query(default=None),
 ):
     if not file.filename.endswith(".txt"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
-
-    # Límite plan free: 3 documentos por chat
-    with get_cursor() as cur:
-        if chat_id:
-            cur.execute(
-                "SELECT COUNT(*) as total FROM memory_documents WHERE user_id = %s AND chat_id = %s",
-                [user["id"], chat_id]
-            )
-        else:
-            cur.execute(
-                "SELECT COUNT(*) as total FROM memory_documents WHERE user_id = %s",
-                [user["id"]]
-            )
-        row = cur.fetchone()
-        if row and row["total"] >= 3:
-            raise HTTPException(status_code=403, detail="Límite de documentos alcanzado (plan free: 3)")
 
     content = await file.read()
     try:
@@ -111,4 +93,4 @@ async def upload_txt(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8")
 
-    return upload_txt_as_memory(user["id"], file.filename, text, chat_id=chat_id)
+    return upload_txt_as_memory(user["id"], file.filename, text, chat_id=None)
