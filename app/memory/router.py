@@ -112,6 +112,7 @@ async def upload_memory(
 async def memory_graph(user: dict = Depends(require_auth)):
     """Analiza la memoria con Gemini y devuelve nodos y conexiones para el grafo neural."""
     import os, requests
+    from app.memory.repository import search_memory_by_embedding
     from app.core.encryption import decrypt
     from app.core.database import get_cursor
 
