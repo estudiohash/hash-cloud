@@ -51,22 +51,21 @@ def _get_all_memory(user_id: str) -> str:
 
 
 def _search_memory(user_id: str, query: str) -> str:
-    """Busca por embeddings, si no encuentra nada trae toda la memoria."""
+    """Busca por embeddings. Si no encuentra nada, devuelve vacío."""
     rows = search_memory_by_embedding(user_id, query)
-    if rows:
-        lines = []
-        for r in rows:
-            msg = r["data"].get("message", "")
-            if not msg:
-                continue
-            try:
-                msg = decrypt(msg)
-            except Exception:
-                pass
-            lines.append(f"[{r['name']}]\n{msg.strip()}")
-        if lines:
-            return "\n\n".join(lines)
-    return _get_all_memory(user_id)
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        msg = r["data"].get("message", "")
+        if not msg:
+            continue
+        try:
+            msg = decrypt(msg)
+        except Exception:
+            pass
+        lines.append(f"[{r['name']}]\n{msg.strip()}")
+    return "\n\n".join(lines)
 
 
 def _build_system_prompt(user_id: str, query: str = "") -> str:

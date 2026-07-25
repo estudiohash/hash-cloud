@@ -1,260 +1,346 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse, Response
 from app.core.jwt import require_auth
-from app.memory.service import (
-    check_memory_status,
-    create_user_memory,
-    read_user_memory,
-    write_user_memory,
-    delete_user_document,
-    rename_user_document,
-    upload_txt_as_memory,
-    export_memory,
-)
-from pydantic import BaseModel
+from app.voice.factory import get_voice_provider
+from app.llm.factory import get_llm_provider
+from app.context.provider import get_hash_sources
+from app.compiler.base_compiler import compile_base_context
+from app.compiler.style_compiler import compile_style_context
+from app.compiler.user_compiler import compile_user_context
+from app.memory.service import read_user_memory, save_message_to_memory
+from app.memory.repository import search_memory_by_embedding
+from app.core.database import get_cursor
+from app.core.encryption import decrypt
+from app.chat.models import ChatRequest, SynthesizeRequest
+import app.chat.repository as repo
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v16
+router = APIRouter(prefix="/chat", tags=["chat"])
 
-MEMORY_ERRORS = {
-    "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
-    "unauthorized":  (status.HTTP_401_UNAUTHORIZED, "Acceso revocado."),
-    "inaccessible":  (status.HTTP_403_FORBIDDEN,   "Documento no accesible."),
-}
-
-def _raise_memory_error(error: str):
-    code, detail = MEMORY_ERRORS.get(error, (500, "Error inesperado"))
-    raise HTTPException(status_code=code, detail=detail)
+FREE_MESSAGE_LIMIT = 10
 
 
-@router.get("/status")
-def memory_status(user: dict = Depends(require_auth)):
-    result = check_memory_status(user["id"])
-    return {"user_id": user["id"], **result}
+def _get_all_memory(user_id: str) -> str:
+    """Trae toda la memoria del usuario desencriptada."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("""
+                SELECT md.name, mr.data
+                FROM memory_rows mr
+                JOIN memory_documents md ON md.id = mr.document_id
+                WHERE md.user_id = %s AND md.key NOT LIKE 'chat_log%'
+                ORDER BY mr.created_at ASC
+            """, [user_id])
+            rows = cur.fetchall()
+        if not rows:
+            return ""
+        lines = []
+        for r in rows:
+            msg = r["data"].get("message", "")
+            if not msg:
+                continue
+            try:
+                msg = decrypt(msg)
+            except Exception:
+                pass
+            lines.append(f"[{r['name']}]\n{msg.strip()}")
+        return "\n\n".join(lines)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"_get_all_memory error: {e}")
+        return ""
 
 
-@router.get("")
-def memory_read(user: dict = Depends(require_auth)):
-    result = read_user_memory(user["id"])
-    if result is None:
-        _raise_memory_error("not_found")
-    if "error" in result:
-        _raise_memory_error(result["error"])
-    return result
+def _search_memory(user_id: str, query: str) -> str:
+    """Busca por embeddings. Si no encuentra nada, devuelve vacío."""
+    rows = search_memory_by_embedding(user_id, query)
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        msg = r["data"].get("message", "")
+        if not msg:
+            continue
+        try:
+            msg = decrypt(msg)
+        except Exception:
+            pass
+        lines.append(f"[{r['name']}]\n{msg.strip()}")
+    return "\n\n".join(lines)
 
 
-@router.get("/export")
-def memory_export(user: dict = Depends(require_auth)):
-    text = export_memory(user["id"])
-    return Response(
-        content=text.encode("utf-8"),
-        media_type="text/plain",
-        headers={"Content-Disposition": "attachment; filename=memoria_hash.txt"}
+def _build_system_prompt(user_id: str, query: str = "") -> str:
+    sources = get_hash_sources()
+    base_context = compile_base_context(sources)
+    style_context = compile_style_context(sources)
+
+    memory_text = _search_memory(user_id, query) if query else ""
+
+    return (
+        f"Fecha y hora actual: {base_context['fecha_actual']}\n\n"
+        + (f"Memoria relevante:\n{memory_text}\n\n" if memory_text else "")
+        + f"Identidad de HASH:\n{base_context['sources']['cognitive_base']}\n\n"
+        f"Log personal:\n{base_context['sources']['personal_log']}\n\n"
+        f"Destilador:\n{base_context['sources']['destilador']}\n\n"
+        f"Estilo:\n{style_context['sources']['style']}"
     )
 
 
-class WriteMemoryRequest(BaseModel):
-    document: str
-    name: str
-    description: str
-    row: dict
+def _is_quota_error(e: Exception) -> bool:
+    msg = str(e)
+    return "429" in msg or "503" in msg or "fallaron" in msg
+
+
+def _get_fallback_provider(provider_name: str):
+    if provider_name != "groq":
+        from app.llm.groq import GroqProvider
+        return GroqProvider()
+    return None
+
+
+# ── Chats CRUD ────────────────────────────────────────────────────────────────
+
+@router.get("/list")
+def list_chats(user: dict = Depends(require_auth)):
+    """Devuelve todos los chats del usuario ordenados por actividad."""
+    return repo.list_chats(user["id"])
+
+
+@router.post("/new")
+def new_chat(user: dict = Depends(require_auth)):
+    """Crea un chat vacío y devuelve su ID."""
+    # Límite plan free: 6 chats
+    from app.core.database import get_cursor
+    with get_cursor() as cur:
+        cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+        row = cur.fetchone()
+        if row and row["total"] >= 6:
+            raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
+    chat = repo.create_chat(user["id"])
+    return chat
+
+
+@router.get("/{chat_id}/messages")
+def get_messages(chat_id: str, user: dict = Depends(require_auth)):
+    """Devuelve el historial de mensajes de un chat."""
+    chat = repo.get_chat(chat_id, user["id"])
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat no encontrado")
+    messages = repo.get_messages(chat_id, user["id"])
+    return {"chat_id": chat_id, "title": chat["title"], "messages": messages}
+
+
+@router.patch("/{chat_id}/title")
+def update_title(chat_id: str, body: dict, user: dict = Depends(require_auth)):
+    """Actualiza el título del chat."""
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="El título no puede estar vacío")
+    repo.update_chat_title(chat_id, user["id"], title)
+    return {"ok": True}
+
+
+@router.delete("/{chat_id}")
+def delete_chat(chat_id: str, user: dict = Depends(require_auth)):
+    """Elimina un chat, todos sus mensajes y sus documentos de memoria."""
+    with get_cursor() as cur:
+        cur.execute("""
+            DELETE FROM memory_rows WHERE document_id IN (
+                SELECT id FROM memory_documents WHERE user_id = %s AND chat_id = %s
+            )
+        """, [user["id"], chat_id])
+        cur.execute(
+            "DELETE FROM memory_documents WHERE user_id = %s AND chat_id = %s",
+            [user["id"], chat_id]
+        )
+    repo.delete_chat(chat_id, user["id"])
+    return {"ok": True}
+
+
+# ── Chat (enviar mensaje) ─────────────────────────────────────────────────────
 
 @router.post("")
-def memory_write(body: WriteMemoryRequest, user: dict = Depends(require_auth)):
+def chat(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
-        return write_user_memory(user["id"], body.document, body.name, body.description, body.row)
-    except ValueError as e:
-        _raise_memory_error(str(e))
+        # Crear chat si no viene chat_id
+        chat_id = body.chat_id
+        if not chat_id:
+            new = repo.create_chat(user["id"])
+            chat_id = new["chat_id"]
+
+        # Límite de mensajes plan free
+        with get_cursor() as cur:
+            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+            u = cur.fetchone()
+        if (not u or u["plan"] == "free"):
+            if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
+
+        # Guardar el mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+            save_message_to_memory(user["id"], "user", last_user_msg.content)
+
+            # Auto-título con las primeras palabras del primer mensaje
+            chat = repo.get_chat(chat_id, user["id"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["id"], auto_title)
+
+        query = last_user_msg.content if last_user_msg else ""
+        system_prompt = _build_system_prompt(user["id"], query)
+        messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
+        llm = get_llm_provider(body.provider)
+
+        try:
+            reply = llm.generate(messages)
+        except RuntimeError as e:
+            if _is_quota_error(e):
+                fallback = _get_fallback_provider(llm.__class__.__name__.lower().replace("provider", ""))
+                if fallback:
+                    reply = fallback.generate(messages)
+                else:
+                    raise
+            else:
+                raise
+
+        # Guardar respuesta del asistente
+        repo.save_message(chat_id, "assistant", reply)
+        save_message_to_memory(user["id"], "assistant", reply)
+
+        return {"reply": reply, "chat_id": chat_id}
+
+    except NotImplementedError as e:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Proveedor no disponible")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-class RenameMemoryRequest(BaseModel):
-    name: str
-
-@router.delete("/{key}")
-def memory_delete(key: str, user: dict = Depends(require_auth)):
+@router.post("/stream")
+def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
-        found = delete_user_document(user["id"], key)
-    except ValueError as e:
-        _raise_memory_error(str(e))
-    if not found:
-        _raise_memory_error("not_found")
-    return {"deleted": True, "key": key}
+        # Límite plan free: 6 chats (antes de entrar al stream)
+        chat_id = body.chat_id
+        if not chat_id:
+            with get_cursor() as cur:
+                cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+                row = cur.fetchone()
+                if row and row["total"] >= 6:
+                    raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
+            new = repo.create_chat(user["id"])
+            chat_id = new["chat_id"]
+
+        # Límite de mensajes plan free
+        with get_cursor() as cur:
+            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+            u = cur.fetchone()
+        if (not u or u["plan"] == "free"):
+            if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
+
+        # Guardar mensaje del usuario
+        last_user_msg = body.messages[-1] if body.messages else None
+        if last_user_msg and last_user_msg.role == "user":
+            repo.save_message(chat_id, "user", last_user_msg.content)
+            save_message_to_memory(user["id"], "user", last_user_msg.content)
+
+            chat = repo.get_chat(chat_id, user["id"])
+            if chat and chat["title"] == "Nueva conversación":
+                auto_title = last_user_msg.content[:50].strip()
+                repo.update_chat_title(chat_id, user["id"], auto_title)
+
+        query = last_user_msg.content if last_user_msg else ""
+        system_prompt = _build_system_prompt(user["id"], query)
+        messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
+        llm = get_llm_provider()
+
+        full_reply = []
+
+        def event_stream():
+            try:
+                for chunk in llm.generate_stream(messages):
+                    full_reply.append(chunk)
+                    escaped = chunk.replace("\n", "\\n")
+                    yield f"data: {escaped}\n\n"
+            except RuntimeError as e:
+                if _is_quota_error(e):
+                    try:
+                        from app.llm.groq import GroqProvider
+                        fallback = GroqProvider()
+                        for chunk in fallback.generate_stream(messages):
+                            full_reply.append(chunk)
+                            escaped = chunk.replace("\n", "\\n")
+                            yield f"data: {escaped}\n\n"
+                    except Exception as fe:
+                        yield f"data: [ERROR] {str(fe)}\n\n"
+                else:
+                    yield f"data: [ERROR] {str(e)}\n\n"
+            except Exception as e:
+                yield f"data: [ERROR] {str(e)}\n\n"
+            finally:
+                # Guardar respuesta completa
+                if full_reply:
+                    complete = "".join(full_reply)
+                    repo.save_message(chat_id, "assistant", complete)
+                    save_message_to_memory(user["id"], "assistant", complete)
+                yield f"data: [CHAT_ID] {chat_id}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat/stream")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-@router.patch("/{key}/rename")
-def memory_rename(key: str, body: RenameMemoryRequest, user: dict = Depends(require_auth)):
+# ── Voz ──────────────────────────────────────────────────────────────────────
+
+@router.post("/synthesize")
+def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
-        found = rename_user_document(user["id"], key, body.name)
-    except ValueError as e:
-        _raise_memory_error(str(e))
-    if not found:
-        _raise_memory_error("not_found")
-    return {"renamed": True, "key": key, "new_name": body.name}
+        voice = get_voice_provider()
+        audio = voice.synthesize(body.text, voice_id=body.voice_id)
+        return Response(content=audio, media_type="audio/mpeg")
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-@router.post("/upload")
-async def upload_memory(
-    file: UploadFile = File(...),
-    user: dict = Depends(require_auth),
-):
-    if not file.filename.endswith(".txt"):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
-
-    content = await file.read()
+@router.post("/synthesize/stream")
+def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8")
+        voice = get_voice_provider()
 
-    return upload_txt_as_memory(user["id"], file.filename, text, chat_id=None)
+        def audio_chunks():
+            try:
+                for chunk in voice.synthesize_stream(body.text, voice_id=body.voice_id):
+                    yield chunk
+            except Exception as e:
+                print(f"Error en stream de audio: {e}")
 
+        return StreamingResponse(
+            audio_chunks(),
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Servicio de voz no disponible temporalmente")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en synthesize")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
-@router.get("/graph")
-async def memory_graph(user: dict = Depends(require_auth)):
-    """Parsea la estructura TEMA del txt y genera el grafo en tiempo real sin LLM."""
-    import re
-    from collections import Counter, defaultdict
-    from app.memory.repository import get_documents_with_rows
-
-    STOPWORDS = {
-        "de", "la", "el", "en", "y", "a", "que", "los", "las", "un", "una",
-        "es", "se", "del", "con", "por", "para", "su", "al", "lo", "le",
-        "me", "te", "si", "no", "the", "and", "of", "to", "in", "is", "it",
-        "that", "was", "for", "on", "are", "with", "as", "he", "she", "they",
-        "este", "esta", "esto", "más", "pero", "como", "hay", "ya", "vez",
-        "ser", "unos", "unas", "también", "cuando", "muy", "porque", "sin",
-        "entre", "desde", "hasta", "sobre", "sido", "son", "está", "tiene",
-        "todo", "toda", "todos", "hacer", "hace", "hice", "tengo", "quiero",
-        "voy", "vos", "eso", "esa", "esos", "esas", "algo", "cada", "ahora",
-        "bien", "solo", "siempre", "nunca", "nada", "algo", "así", "acá",
-        "porque", "aunque", "mientras", "después", "antes", "entonces",
-        "donde", "cuando", "quien", "cual", "cuál", "qué", "cómo", "para",
-        "fueron", "tenés", "podés", "hacer", "haber", "estar", "había",
-        "puedo", "puede", "mismo", "misma", "tipo", "igual", "otra", "otro",
-        "decir", "dice", "dije", "quería", "quiere", "saber", "salud",
-    }
-
-    documents = get_documents_with_rows(user["id"])
-    documents = [d for d in documents if not d["key"].startswith("chat_log")]
-
-    if not documents:
-        return {"nodes": [], "edges": []}
-
-    # Unir todo el contenido desencriptado
-    full_text = "\n".join(
-        row.get("message", "")
-        for doc in documents
-        for row in doc["rows"]
-        if row.get("message")
-    )
-
-    # Parsear secciones TEMA: X del txt
-    sections: dict[str, str] = {}
-    current_tema = None
-    current_lines = []
-    for line in full_text.splitlines():
-        match = re.match(r'^TEMA:\s*(.+)', line.strip())
-        if match:
-            if current_tema:
-                sections[current_tema] = " ".join(current_lines)
-            current_tema = match.group(1).strip().upper()
-            current_lines = []
-        else:
-            if current_tema:
-                current_lines.append(line.strip())
-    if current_tema:
-        sections[current_tema] = " ".join(current_lines)
-
-    # Si no hay estructura TEMA, usar los documentos como nodos principales
-    if not sections:
-        sections = {
-            doc["name"].upper(): " ".join(
-                row.get("message", "") for row in doc["rows"] if row.get("message")
-            )
-            for doc in documents
-        }
-
-    FIRMA_PATTERNS = [
-        r"No conf[ií]o en que sea[^.]*\.",
-        r"No me como los mocos[^.]*\.",
-        r"Motor potente[^.]*\.",
-        r"memoria viva rebelde[^.]*\.",
-        r"Se termin[oó] el teatro[^.]*\.",
-        r"Soy esto ahora[^.]*\.",
-        r"Sigo rompiendo[^.]*\.",
-    ]
-    NOISE_WORDS = {"mocos", "motor", "rebelde", "tesla", "teatro", "glitch", "hdp", "orto", "posta", "potente", "rompiendo", "viva"}
-
-    def clean_text(text: str) -> str:
-        for pat in FIRMA_PATTERNS:
-            text = re.sub(pat, "", text, flags=re.IGNORECASE)
-        return text
-
-    def extract_concepts(text: str, top_n: int = 8) -> list[str]:
-        text = clean_text(text)
-        words = re.findall(r'\b[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{3,}\b', text.lower())
-        words = [w for w in words if w not in STOPWORDS]
-        bigrams = [f"{words[i]} {words[i+1]}" for i in range(len(words) - 1)]
-        bigrams = [bg for bg in bigrams if not any(n in bg for n in NOISE_WORDS)]
-        top_bigrams = [bg for bg, c in Counter(bigrams).most_common(top_n * 2) if c >= 2]
-        selected = top_bigrams[:top_n]
-        if len(selected) < 4:
-            for w, _ in Counter(words).most_common(top_n):
-                if w not in " ".join(selected) and len(selected) < top_n:
-                    selected.append(w)
-        return selected[:top_n]
-
-    # Conceptos por tema
-    tema_keywords: dict[str, list[str]] = {
-        tema: extract_concepts(texto)
-        for tema, texto in sections.items()
-    }
-
-    # Detectar conceptos que aparecen en múltiples temas
-    keyword_to_temas: dict[str, list[str]] = defaultdict(list)
-    for tema, kws in tema_keywords.items():
-        for kw in kws:
-            keyword_to_temas[kw].append(tema)
-
-    shared_concepts = {kw: temas for kw, temas in keyword_to_temas.items() if len(temas) >= 2}
-
-    # Construir grafo
-    nodes = [{"id": "cerebro", "label": "Cerebro", "main": True}]
-    edges = []
-    node_ids = {"cerebro"}
-
-    # Nodos de TEMA — van al anillo del medio (sin main ni sub)
-    for tema in sections:
-        tid = f"tema_{tema}"
-        nodes.append({"id": tid, "label": tema.capitalize()})
-        edges.append({"from": "cerebro", "to": tid})
-        node_ids.add(tid)
-
-    # Subnodos exclusivos de cada tema (no compartidos)
-    for tema, kws in tema_keywords.items():
-        tid = f"tema_{tema}"
-        for kw in kws:
-            if kw not in shared_concepts:
-                kid = f"kw_{kw}"
-                if kid not in node_ids:
-                    nodes.append({"id": kid, "label": kw, "sub": True})
-                    node_ids.add(kid)
-                edges.append({"from": tid, "to": kid})
-
-    # Nodos compartidos — conectados a todos los temas donde aparecen
-    for kw, temas in shared_concepts.items():
-        kid = f"kw_{kw}"
-        if kid not in node_ids:
-            nodes.append({"id": kid, "label": kw, "sub": True, "shared": True})
-            node_ids.add(kid)
-        for tema in temas:
-            edges.append({"from": f"tema_{tema}", "to": kid})
-
-    # Conectar temas que comparten 3+ keywords
-    tema_list = list(sections.keys())
-    for i in range(len(tema_list)):
-        for j in range(i + 1, len(tema_list)):
-            shared = set(tema_keywords.get(tema_list[i], [])) & set(tema_keywords.get(tema_list[j], []))
-            if len(shared) >= 3:
-                edges.append({"from": f"tema_{tema_list[i]}", "to": f"tema_{tema_list[j]}"})
-
-    return {"nodes": nodes, "edges": edges}
