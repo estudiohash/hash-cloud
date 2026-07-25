@@ -75,6 +75,7 @@ def _build_system_prompt(user_id: str, query: str = "") -> str:
 
     memory_text = _search_memory(user_id, query) if query else ""
 
+    print(f">>> SYSTEM PROMPT MEMORY: {len(memory_text)} chars", flush=True)
     return (
         f"Fecha y hora actual: {base_context['fecha_actual']}\n\n"
         + (f"Memoria relevante:\n{memory_text}\n\n" if memory_text else "")
