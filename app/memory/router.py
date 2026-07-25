@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v11
+router = APIRouter(prefix="/memory", tags=["memory"])  # v12
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -116,42 +116,43 @@ async def memory_graph(user: dict = Depends(require_auth)):
     from app.core.encryption import decrypt
     from app.core.database import get_cursor
 
-    # Leer toda la memoria (solo documentos, no chat_log)
+    # Obtener documentos del usuario
     try:
         with get_cursor() as cur:
             cur.execute("""
-                SELECT md.name, mr.data
-                FROM memory_rows mr
-                JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s AND md.key NOT LIKE 'chat_log%%'
-                ORDER BY mr.created_at ASC
-                LIMIT 20
+                SELECT id, name FROM memory_documents
+                WHERE user_id = %s AND key NOT LIKE 'chat_log%%'
+                ORDER BY created_at ASC
             """, (user["id"],))
-            rows = cur.fetchall()
+            docs = cur.fetchall()
     except Exception as e:
         import traceback; tb = traceback.format_exc(); print("GRAPH DB ERROR:", tb)
         raise HTTPException(status_code=500, detail=tb)
 
-    if not rows:
+    if not docs:
         return {"nodes": [], "edges": []}
 
-    # Desencriptar y armar el texto
+    doc_names = [d["name"] for d in docs]
+
+    # Por cada tema, buscar chunks relevantes por embedding
     fragments = []
-    try:
-        for r in rows:
-            msg = r["data"].get("message", "")
+    for doc in docs:
+        results = search_memory_by_embedding(user["id"], doc["name"], limit=2)
+        for r in results:
+            data = r.get("data", {}) if isinstance(r, dict) else {}
+            msg = data.get("message", "") if isinstance(data, dict) else ""
             if not msg:
                 continue
             try:
                 msg = decrypt(msg)
             except Exception:
                 pass
-            fragments.append(f"[{r['name']}]\n{msg[:3000]}")
-    except Exception as e:
-        import traceback; tb = traceback.format_exc(); print("GRAPH DECRYPT ERROR:", tb)
-        raise HTTPException(status_code=500, detail=tb)
+            fragments.append(f"[{doc['name']}]\n{msg[:2000]}")
 
-    memory_text = "\n\n".join(fragments)[:12000]
+    if not fragments:
+        return {"nodes": [], "edges": []}
+
+    memory_text = "\n\n".join(fragments)[:10000]
 
     # Llamar a Gemini para extraer el grafo
     api_key = os.getenv("GEMINI_API_KEY")
