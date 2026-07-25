@@ -8,6 +8,7 @@ from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
 from app.compiler.user_compiler import compile_user_context
 from app.memory.service import read_user_memory, save_message_to_memory
+from app.memory.repository import search_memory_by_embedding
 from app.core.database import get_cursor
 from app.core.encryption import decrypt
 from app.chat.models import ChatRequest, SynthesizeRequest
@@ -18,52 +19,22 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 FREE_MESSAGE_LIMIT = 10
 
 
-def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
-    """Trae toda la memoria, desencripta en Python y filtra por palabras clave."""
-    words = [w.strip().lower() for w in query.split() if w.strip()]
-    if not words:
+def _search_memory(user_id: str, query: str) -> str:
+    """Busca en memoria usando embeddings por similitud semántica."""
+    rows = search_memory_by_embedding(user_id, query)
+    if not rows:
         return ""
-    try:
-        with get_cursor() as cur:
-            cur.execute("""
-                SELECT md.name, mr.data
-                FROM memory_rows mr
-                JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s
-                ORDER BY mr.created_at DESC
-            """, [user_id])
-            rows = cur.fetchall()
-        if not rows:
-            return ""
-        lines = []
-        for r in rows:
-            if len(lines) >= limit:
-                break
-            msg = r["data"].get("message", "")
-            if not msg:
-                continue
-            try:
-                msg = decrypt(msg)
-            except Exception:
-                pass
-            lower_msg = msg.lower()
-            pos = -1
-            for w in words:
-                p = lower_msg.find(w)
-                if p != -1:
-                    pos = p
-                    break
-            if pos == -1:
-                continue
-            start = max(0, pos - 200)
-            end = min(len(msg), pos + 200)
-            fragment = msg[start:end].strip()
-            lines.append(f"[{r['name']}]\n{fragment}")
-        return "\n\n".join(lines)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"_search_memory error: {e}")
-        return ""
+    lines = []
+    for r in rows:
+        msg = r["data"].get("message", "")
+        if not msg:
+            continue
+        try:
+            msg = decrypt(msg)
+        except Exception:
+            pass
+        lines.append(f"[{r['name']}]\n{msg[:600].strip()}")
+    return "\n\n".join(lines)
 
 
 def _build_system_prompt(user_id: str, query: str = "") -> str:
