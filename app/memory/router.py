@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v3
+router = APIRouter(prefix="/memory", tags=["memory"])  # v4
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -205,4 +205,6 @@ Reglas:
         return graph
     except Exception as e:
         import traceback
-        raise HTTPException(status_code=500, detail=traceback.format_exc())
+        tb = traceback.format_exc()
+        print("GRAPH ERROR:", tb)
+        raise HTTPException(status_code=500, detail=tb)
