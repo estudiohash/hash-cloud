@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v12
+router = APIRouter(prefix="/memory", tags=["memory"])  # v13
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -134,20 +134,27 @@ async def memory_graph(user: dict = Depends(require_auth)):
 
     doc_names = [d["name"] for d in docs]
 
-    # Por cada tema, buscar chunks relevantes por embedding
+    # Leer contenido directo de la DB y desencriptar
     fragments = []
     for doc in docs:
-        results = search_memory_by_embedding(user["id"], doc["name"], limit=2)
-        for r in results:
-            data = r.get("data", {}) if isinstance(r, dict) else {}
-            msg = data.get("message", "") if isinstance(data, dict) else ""
-            if not msg:
-                continue
-            try:
-                msg = decrypt(msg)
-            except Exception:
-                pass
-            fragments.append(f"[{doc['name']}]\n{msg[:2000]}")
+        try:
+            with get_cursor() as cur:
+                cur.execute(
+                    "SELECT data FROM memory_rows WHERE document_id = %s ORDER BY created_at ASC LIMIT 3",
+                    (doc["id"],)
+                )
+                rows = cur.fetchall()
+            for r in rows:
+                msg = r["data"].get("message", "") if isinstance(r["data"], dict) else ""
+                if not msg:
+                    continue
+                try:
+                    msg = decrypt(msg)
+                except Exception:
+                    pass
+                fragments.append(f"[{doc['name']}]\n{msg[:2000]}")
+        except Exception:
+            pass
 
     if not fragments:
         return {"nodes": [], "edges": []}
