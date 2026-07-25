@@ -19,28 +19,26 @@ FREE_MESSAGE_LIMIT = 10
 
 
 def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
-    """Busca en toda la memoria filtrando por palabras clave directamente en SQL."""
-    words = [w.strip() for w in query.split() if len(w.strip()) > 3]
+    """Trae toda la memoria, desencripta en Python y filtra por palabras clave."""
+    words = [w.strip().lower() for w in query.split() if len(w.strip()) > 3]
     if not words:
         return ""
     try:
-        # Construir condición ILIKE para cada palabra
-        conditions = " OR ".join(["mr.data::text ILIKE %s"] * len(words))
-        params = [user_id] + [f"%{w}%" for w in words] + [limit]
         with get_cursor() as cur:
-            cur.execute(f"""
+            cur.execute("""
                 SELECT md.name, mr.data
                 FROM memory_rows mr
                 JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s AND ({conditions})
+                WHERE md.user_id = %s
                 ORDER BY mr.created_at DESC
-                LIMIT %s
-            """, params)
+            """, [user_id])
             rows = cur.fetchall()
         if not rows:
             return ""
         lines = []
         for r in rows:
+            if len(lines) >= limit:
+                break
             msg = r["data"].get("message", "")
             if not msg:
                 continue
@@ -51,16 +49,15 @@ def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
             lower_msg = msg.lower()
             pos = -1
             for w in words:
-                p = lower_msg.find(w.lower())
+                p = lower_msg.find(w)
                 if p != -1:
                     pos = p
                     break
-            if pos != -1:
-                start = max(0, pos - 200)
-                end = min(len(msg), pos + 200)
-                fragment = msg[start:end].strip()
-            else:
-                fragment = msg[:400].strip()
+            if pos == -1:
+                continue
+            start = max(0, pos - 200)
+            end = min(len(msg), pos + 200)
+            fragment = msg[start:end].strip()
             lines.append(f"[{r['name']}]\n{fragment}")
         return "\n\n".join(lines)
     except Exception:
