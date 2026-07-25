@@ -107,7 +107,15 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str
 
     document_id, created = get_or_create_document(user_id, key, name, description, chat_id=chat_id)
 
-    # Guardar el contenido completo como un solo bloque
-    add_row(document_id, {"message": content.strip()}, with_embedding=True)
+    # Dividir en chunks de ~1600 líneas (~250KB) y guardar cada uno con embedding
+    lines = content.strip().splitlines()
+    chunk_size = 1600
+    chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
 
-    return {"document": key, "created": created, "rows_added": 1}
+    for chunk in chunks:
+        chunk_text = "
+".join(chunk).strip()
+        if chunk_text:
+            add_row(document_id, {"message": chunk_text}, with_embedding=True)
+
+    return {"document": key, "created": created, "rows_added": len(chunks)}

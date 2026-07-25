@@ -19,22 +19,54 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 FREE_MESSAGE_LIMIT = 10
 
 
-def _search_memory(user_id: str, query: str) -> str:
-    """Busca en memoria usando embeddings por similitud semántica."""
-    rows = search_memory_by_embedding(user_id, query)
-    if not rows:
+def _get_all_memory(user_id: str) -> str:
+    """Trae toda la memoria del usuario desencriptada."""
+    try:
+        with get_cursor() as cur:
+            cur.execute("""
+                SELECT md.name, mr.data
+                FROM memory_rows mr
+                JOIN memory_documents md ON md.id = mr.document_id
+                WHERE md.user_id = %s AND md.key NOT LIKE 'chat_log%'
+                ORDER BY mr.created_at ASC
+            """, [user_id])
+            rows = cur.fetchall()
+        if not rows:
+            return ""
+        lines = []
+        for r in rows:
+            msg = r["data"].get("message", "")
+            if not msg:
+                continue
+            try:
+                msg = decrypt(msg)
+            except Exception:
+                pass
+            lines.append(f"[{r['name']}]\n{msg.strip()}")
+        return "\n\n".join(lines)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"_get_all_memory error: {e}")
         return ""
-    lines = []
-    for r in rows:
-        msg = r["data"].get("message", "")
-        if not msg:
-            continue
-        try:
-            msg = decrypt(msg)
-        except Exception:
-            pass
-        lines.append(f"[{r['name']}]\n{msg[:600].strip()}")
-    return "\n\n".join(lines)
+
+
+def _search_memory(user_id: str, query: str) -> str:
+    """Busca por embeddings, si no encuentra nada trae toda la memoria."""
+    rows = search_memory_by_embedding(user_id, query)
+    if rows:
+        lines = []
+        for r in rows:
+            msg = r["data"].get("message", "")
+            if not msg:
+                continue
+            try:
+                msg = decrypt(msg)
+            except Exception:
+                pass
+            lines.append(f"[{r['name']}]\n{msg.strip()}")
+        if lines:
+            return "\n\n".join(lines)
+    return _get_all_memory(user_id)
 
 
 def _build_system_prompt(user_id: str, query: str = "") -> str:
