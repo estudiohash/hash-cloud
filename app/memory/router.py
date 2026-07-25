@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v15
+router = APIRouter(prefix="/memory", tags=["memory"])  # v16
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -140,7 +140,7 @@ async def memory_graph(user: dict = Depends(require_auth)):
         try:
             with get_cursor() as cur:
                 cur.execute(
-                    "SELECT data FROM memory_rows WHERE document_id = %s ORDER BY created_at ASC LIMIT 3",
+                    "SELECT data FROM memory_rows WHERE document_id = %s ORDER BY created_at ASC LIMIT 9",
                     (doc["id"],)
                 )
                 rows = cur.fetchall()
@@ -153,7 +153,7 @@ async def memory_graph(user: dict = Depends(require_auth)):
                     print(f"DECRYPT OK [{doc['name']}]: {msg[:80]}")
                 except Exception as de:
                     print(f"DECRYPT FAIL [{doc['name']}]: {de} | raw: {msg[:80]}")
-                fragments.append(f"[{doc['name']}]\n{msg[:2000]}")
+                fragments.append(f"[{doc['name']}]\n{msg[:800]}")
         except Exception as e:
             print(f"GRAPH FRAGMENT ERROR: {e}")
 
