@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"])  # v2
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -191,7 +191,10 @@ Reglas:
             timeout=30,
         )
         res.raise_for_status()
-        text = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        gemini_json = res.json()
+        if not gemini_json.get("candidates"):
+            raise HTTPException(status_code=500, detail=f"Gemini sin candidates: {gemini_json}")
+        text = gemini_json["candidates"][0]["content"]["parts"][0]["text"].strip()
         # Limpiar markdown si viene
         if text.startswith("```"):
             text = text.split("```")[1]
