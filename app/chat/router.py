@@ -69,6 +69,7 @@ def _search_memory(user_id: str, query: str) -> str:
 
 
 def _build_system_prompt(user_id: str, query: str = "") -> str:
+    print(f">>> _build_system_prompt called, query len: {len(query)}", flush=True)
     sources = get_hash_sources()
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
