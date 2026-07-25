@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import Response
 from app.core.jwt import require_auth
 from app.memory.service import (
     check_memory_status,
@@ -8,6 +9,7 @@ from app.memory.service import (
     delete_user_document,
     rename_user_document,
     upload_txt_as_memory,
+    export_memory,
 )
 from pydantic import BaseModel
 
@@ -38,6 +40,16 @@ def memory_read(user: dict = Depends(require_auth)):
     if "error" in result:
         _raise_memory_error(result["error"])
     return result
+
+
+@router.get("/export")
+def memory_export(user: dict = Depends(require_auth)):
+    text = export_memory(user["id"])
+    return Response(
+        content=text.encode("utf-8"),
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=memoria_hash.txt"}
+    )
 
 
 class WriteMemoryRequest(BaseModel):

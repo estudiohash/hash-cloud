@@ -7,7 +7,7 @@ from app.context.provider import get_hash_sources
 from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
 from app.compiler.user_compiler import compile_user_context
-from app.memory.service import read_user_memory
+from app.memory.service import read_user_memory, save_message_to_memory
 from app.core.database import get_cursor
 from app.core.encryption import decrypt
 from app.chat.models import ChatRequest, SynthesizeRequest
@@ -178,6 +178,7 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
         last_user_msg = body.messages[-1] if body.messages else None
         if last_user_msg and last_user_msg.role == "user":
             repo.save_message(chat_id, "user", last_user_msg.content)
+            save_message_to_memory(user["id"], "user", last_user_msg.content)
 
             # Auto-título con las primeras palabras del primer mensaje
             chat = repo.get_chat(chat_id, user["id"])
@@ -204,6 +205,7 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
 
         # Guardar respuesta del asistente
         repo.save_message(chat_id, "assistant", reply)
+        save_message_to_memory(user["id"], "assistant", reply)
 
         return {"reply": reply, "chat_id": chat_id}
 
@@ -241,6 +243,7 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         last_user_msg = body.messages[-1] if body.messages else None
         if last_user_msg and last_user_msg.role == "user":
             repo.save_message(chat_id, "user", last_user_msg.content)
+            save_message_to_memory(user["id"], "user", last_user_msg.content)
 
             chat = repo.get_chat(chat_id, user["id"])
             if chat and chat["title"] == "Nueva conversación":
@@ -278,7 +281,9 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
             finally:
                 # Guardar respuesta completa
                 if full_reply:
-                    repo.save_message(chat_id, "assistant", "".join(full_reply))
+                    complete = "".join(full_reply)
+                    repo.save_message(chat_id, "assistant", complete)
+                    save_message_to_memory(user["id"], "assistant", complete)
                 yield f"data: [CHAT_ID] {chat_id}\n\n"
                 yield "data: [DONE]\n\n"
 

@@ -66,6 +66,35 @@ def rename_user_document(user_id: str, key: str, new_name: str) -> bool:
     return rename_document(user_id, key, new_name)
 
 
+def save_message_to_memory(user_id: str, role: str, content: str) -> None:
+    """Guarda cada mensaje del chat en memoria en tiempo real."""
+    if not user_exists(user_id):
+        create_user(user_id)
+    document_id, _ = get_or_create_document(
+        user_id, "chat_log", "Chat log", "Historial automático de conversaciones"
+    )
+    add_row(document_id, {"role": role, "message": content})
+
+
+def export_memory(user_id: str) -> str:
+    """Devuelve toda la memoria del usuario como texto plano."""
+    if not user_exists(user_id):
+        return ""
+    documents = get_documents_with_rows(user_id)
+    lines = []
+    for doc in documents:
+        lines.append(f"=== {doc['name']} ===")
+        for row in doc["rows"]:
+            role = row.get("role", "")
+            msg = row.get("message", "")
+            if role:
+                lines.append(f"[{role}] {msg}")
+            else:
+                lines.append(msg)
+        lines.append("")
+    return "\n".join(lines)
+
+
 def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str | None = None) -> dict:
     if not user_exists(user_id):
         create_user(user_id)
