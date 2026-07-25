@@ -113,8 +113,7 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str
     chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
 
     for chunk in chunks:
-        chunk_text = "
-".join(chunk).strip()
+        chunk_text = '\n'.join(chunk).strip()
         if chunk_text:
             add_row(document_id, {"message": chunk_text}, with_embedding=True)
 
