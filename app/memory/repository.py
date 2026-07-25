@@ -46,15 +46,14 @@ def get_or_create_document(user_id: str, key: str, name: str, description: str, 
         return str(new_id), True
 
 
-def add_row(document_id: str, data: dict) -> dict:
+def add_row(document_id: str, data: dict, with_embedding: bool = False) -> dict:
     created_at = datetime.now(timezone.utc)
     encrypted_data = {**data}
     if "message" in encrypted_data:
         encrypted_data["message"] = encrypt(encrypted_data["message"])
 
-    # Generar embedding del mensaje original (sin encriptar)
     embedding = None
-    if "message" in data and data["message"]:
+    if with_embedding and "message" in data and data["message"]:
         embedding = get_embedding(data["message"])
 
     with get_cursor() as cur:
