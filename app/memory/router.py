@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v4
+router = APIRouter(prefix="/memory", tags=["memory"])  # v5
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -129,22 +129,27 @@ async def memory_graph(user: dict = Depends(require_auth)):
             """, [user["id"]])
             rows = cur.fetchall()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback; tb = traceback.format_exc(); print("GRAPH DB ERROR:", tb)
+        raise HTTPException(status_code=500, detail=tb)
 
     if not rows:
         return {"nodes": [], "edges": []}
 
     # Desencriptar y armar el texto
     fragments = []
-    for r in rows:
-        msg = r["data"].get("message", "")
-        if not msg:
-            continue
-        try:
-            msg = decrypt(msg)
-        except Exception:
-            pass
-        fragments.append(f"[{r['name']}]\n{msg[:3000]}")
+    try:
+        for r in rows:
+            msg = r["data"].get("message", "")
+            if not msg:
+                continue
+            try:
+                msg = decrypt(msg)
+            except Exception:
+                pass
+            fragments.append(f"[{r['name']}]\n{msg[:3000]}")
+    except Exception as e:
+        import traceback; tb = traceback.format_exc(); print("GRAPH DECRYPT ERROR:", tb)
+        raise HTTPException(status_code=500, detail=tb)
 
     memory_text = "\n\n".join(fragments)[:12000]
 
