@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v2
+router = APIRouter(prefix="/memory", tags=["memory"])  # v3
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
