@@ -106,3 +106,99 @@ async def upload_memory(
         raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8")
 
     return upload_txt_as_memory(user["id"], file.filename, text, chat_id=None)
+
+
+@router.get("/graph")
+async def memory_graph(user: dict = Depends(require_auth)):
+    """Analiza la memoria con Gemini y devuelve nodos y conexiones para el grafo neural."""
+    import os, requests
+    from app.memory.repository import search_memory_by_embedding
+    from app.core.encryption import decrypt
+    from app.core.database import get_cursor
+
+    # Leer toda la memoria (solo documentos, no chat_log)
+    try:
+        with get_cursor() as cur:
+            cur.execute("""
+                SELECT md.name, mr.data
+                FROM memory_rows mr
+                JOIN memory_documents md ON md.id = mr.document_id
+                WHERE md.user_id = %s AND md.key NOT LIKE 'chat_log%'
+                ORDER BY mr.created_at ASC
+                LIMIT 20
+            """, [user["id"]])
+            rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not rows:
+        return {"nodes": [], "edges": []}
+
+    # Desencriptar y armar el texto
+    fragments = []
+    for r in rows:
+        msg = r["data"].get("message", "")
+        if not msg:
+            continue
+        try:
+            msg = decrypt(msg)
+        except Exception:
+            pass
+        fragments.append(f"[{r['name']}]\n{msg[:3000]}")
+
+    memory_text = "\n\n".join(fragments)[:12000]
+
+    # Llamar a Gemini para extraer el grafo
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY no configurada")
+
+    prompt = f"""Analizá esta memoria personal y extraé un grafo de conceptos.
+
+MEMORIA:
+{memory_text}
+
+Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional:
+{{
+  "nodes": [
+    {{"id": "cerebro", "label": "Cerebro", "main": true}},
+    {{"id": "nodo1", "label": "Nombre corto", "main": false}},
+    {{"id": "subnodo1", "label": "Concepto", "sub": true, "parent": "nodo1"}}
+  ],
+  "edges": [
+    {{"from": "cerebro", "to": "nodo1"}},
+    {{"from": "nodo1", "to": "subnodo1"}}
+  ]
+}}
+
+Reglas:
+- Siempre incluir el nodo central con id "cerebro" y label "Cerebro"
+- 5 a 8 nodos principales (main: true) con temas importantes de la memoria
+- 3 a 5 subnodos por nodo principal (sub: true) con conceptos específicos encontrados
+- Conectar cerebro con todos los nodos principales
+- Conectar nodos principales entre sí si comparten ideas
+- Conectar cada subnodo con su nodo padre
+- Los labels deben ser cortos (1-3 palabras máximo)
+- Solo JSON, sin markdown, sin explicaciones"""
+
+    try:
+        model = os.getenv("LLM_MODEL", "gemini-2.0-flash-lite")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        res = requests.post(
+            url,
+            params={"key": api_key},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=30,
+        )
+        res.raise_for_status()
+        text = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # Limpiar markdown si viene
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        import json
+        graph = json.loads(text)
+        return graph
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando grafo: {e}")
