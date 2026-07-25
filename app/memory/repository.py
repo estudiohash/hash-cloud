@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from psycopg2.extras import Json
 from app.core.database import get_cursor
 from app.core.encryption import encrypt, decrypt
+from app.memory.embeddings import get_embedding
 
 
 def user_exists(user_id: str) -> bool:
@@ -50,16 +51,52 @@ def add_row(document_id: str, data: dict) -> dict:
     encrypted_data = {**data}
     if "message" in encrypted_data:
         encrypted_data["message"] = encrypt(encrypted_data["message"])
+
+    # Generar embedding del mensaje original (sin encriptar)
+    embedding = None
+    if "message" in data and data["message"]:
+        embedding = get_embedding(data["message"])
+
     with get_cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO memory_rows (document_id, data, created_at)
-            VALUES (%s, %s, %s)
-            RETURNING id;
-            """,
-            (document_id, Json(encrypted_data), created_at),
-        )
+        if embedding:
+            cur.execute(
+                """
+                INSERT INTO memory_rows (document_id, data, created_at, embedding)
+                VALUES (%s, %s, %s, %s::vector)
+                RETURNING id;
+                """,
+                (document_id, Json(encrypted_data), created_at, str(embedding)),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO memory_rows (document_id, data, created_at)
+                VALUES (%s, %s, %s)
+                RETURNING id;
+                """,
+                (document_id, Json(encrypted_data), created_at),
+            )
     return {**data, "created_at": created_at.isoformat()}
+
+
+def search_memory_by_embedding(user_id: str, query: str, limit: int = 10) -> list[dict]:
+    """Busca en memoria usando similitud de embeddings."""
+    query_embedding = get_embedding(query)
+    if not query_embedding:
+        return []
+    try:
+        with get_cursor() as cur:
+            cur.execute("""
+                SELECT md.name, mr.data, 1 - (mr.embedding <=> %s::vector) AS similarity
+                FROM memory_rows mr
+                JOIN memory_documents md ON md.id = mr.document_id
+                WHERE md.user_id = %s AND mr.embedding IS NOT NULL
+                ORDER BY mr.embedding <=> %s::vector
+                LIMIT %s
+            """, (str(query_embedding), user_id, str(query_embedding), limit))
+            return cur.fetchall()
+    except Exception:
+        return []
 
 
 def get_index(user_id: str) -> list[dict]:
