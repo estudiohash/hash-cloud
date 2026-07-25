@@ -110,119 +110,126 @@ async def upload_memory(
 
 @router.get("/graph")
 async def memory_graph(user: dict = Depends(require_auth)):
-    """Analiza la memoria con Gemini y devuelve nodos y conexiones para el grafo neural."""
-    import os, requests
-    from app.memory.repository import search_memory_by_embedding
-    from app.core.encryption import decrypt
-    from app.core.database import get_cursor
+    """Parsea la estructura TEMA del txt y genera el grafo en tiempo real sin LLM."""
+    import re
+    from collections import Counter, defaultdict
+    from app.memory.repository import get_documents_with_rows
 
-    # Obtener documentos del usuario
-    try:
-        with get_cursor() as cur:
-            cur.execute("""
-                SELECT id, name FROM memory_documents
-                WHERE user_id = %s AND key NOT LIKE 'chat_log%%'
-                ORDER BY created_at ASC
-            """, (user["id"],))
-            docs = cur.fetchall()
-    except Exception as e:
-        import traceback; tb = traceback.format_exc(); print("GRAPH DB ERROR:", tb)
-        raise HTTPException(status_code=500, detail=tb)
+    STOPWORDS = {
+        "de", "la", "el", "en", "y", "a", "que", "los", "las", "un", "una",
+        "es", "se", "del", "con", "por", "para", "su", "al", "lo", "le",
+        "me", "te", "si", "no", "the", "and", "of", "to", "in", "is", "it",
+        "that", "was", "for", "on", "are", "with", "as", "he", "she", "they",
+        "este", "esta", "esto", "más", "pero", "como", "hay", "ya", "vez",
+        "ser", "unos", "unas", "también", "cuando", "muy", "porque", "sin",
+        "entre", "desde", "hasta", "sobre", "sido", "son", "está", "tiene",
+        "todo", "toda", "todos", "hacer", "hace", "hice", "tengo", "quiero",
+        "voy", "vos", "eso", "esa", "esos", "esas", "algo", "cada", "ahora",
+        "bien", "solo", "siempre", "nunca", "nada", "algo", "así", "acá",
+        "porque", "aunque", "mientras", "después", "antes", "entonces",
+        "donde", "cuando", "quien", "cual", "cuál", "qué", "cómo", "para",
+        "fueron", "tenés", "podés", "hacer", "haber", "estar", "había",
+        "puedo", "puede", "mismo", "misma", "tipo", "igual", "otra", "otro",
+        "decir", "dice", "dije", "quería", "quiere", "saber", "salud",
+    }
 
-    if not docs:
+    documents = get_documents_with_rows(user["id"])
+    documents = [d for d in documents if not d["key"].startswith("chat_log")]
+
+    if not documents:
         return {"nodes": [], "edges": []}
 
-    doc_names = [d["name"] for d in docs]
+    # Unir todo el contenido desencriptado
+    full_text = "\n".join(
+        row.get("message", "")
+        for doc in documents
+        for row in doc["rows"]
+        if row.get("message")
+    )
 
-    # Leer contenido directo de la DB y desencriptar
-    fragments = []
-    for doc in docs:
-        try:
-            with get_cursor() as cur:
-                cur.execute(
-                    "SELECT data FROM memory_rows WHERE document_id = %s ORDER BY created_at ASC LIMIT 9",
-                    (doc["id"],)
-                )
-                rows = cur.fetchall()
-            for r in rows:
-                msg = r["data"].get("message", "") if isinstance(r["data"], dict) else ""
-                if not msg:
-                    continue
-                try:
-                    msg = decrypt(msg)
-                    print(f"DECRYPT OK [{doc['name']}]: {msg[:80]}")
-                except Exception as de:
-                    print(f"DECRYPT FAIL [{doc['name']}]: {de} | raw: {msg[:80]}")
-                fragments.append(f"[{doc['name']}]\n{msg[:800]}")
-        except Exception as e:
-            print(f"GRAPH FRAGMENT ERROR: {e}")
+    # Parsear secciones TEMA: X del txt
+    sections: dict[str, str] = {}
+    current_tema = None
+    current_lines = []
+    for line in full_text.splitlines():
+        match = re.match(r'^TEMA:\s*(.+)', line.strip())
+        if match:
+            if current_tema:
+                sections[current_tema] = " ".join(current_lines)
+            current_tema = match.group(1).strip().upper()
+            current_lines = []
+        else:
+            if current_tema:
+                current_lines.append(line.strip())
+    if current_tema:
+        sections[current_tema] = " ".join(current_lines)
 
-    if not fragments:
-        return {"nodes": [], "edges": []}
+    # Si no hay estructura TEMA, usar los documentos como nodos principales
+    if not sections:
+        sections = {
+            doc["name"].upper(): " ".join(
+                row.get("message", "") for row in doc["rows"] if row.get("message")
+            )
+            for doc in documents
+        }
 
-    memory_text = "\n\n".join(fragments)[:10000]
+    def extract_keywords(text: str, top_n: int = 8) -> list[str]:
+        words = re.findall(r'\b[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{4,}\b', text.lower())
+        words = [w for w in words if w not in STOPWORDS]
+        return [w for w, _ in Counter(words).most_common(top_n)]
 
-    # Llamar a Gemini para extraer el grafo
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY no configurada")
+    # Keywords por tema
+    tema_keywords: dict[str, list[str]] = {
+        tema: extract_keywords(texto)
+        for tema, texto in sections.items()
+    }
 
-    temas_lista = "\n".join(f"- {n}" for n in doc_names)
-    prompt = f"""Analizá esta memoria y generá un grafo de conexiones.
+    # Detectar conceptos que aparecen en múltiples temas
+    keyword_to_temas: dict[str, list[str]] = defaultdict(list)
+    for tema, kws in tema_keywords.items():
+        for kw in kws:
+            keyword_to_temas[kw].append(tema)
 
-TEMAS OBLIGATORIOS (cada uno DEBE ser un nodo principal):
-{temas_lista}
+    shared_concepts = {kw: temas for kw, temas in keyword_to_temas.items() if len(temas) >= 2}
 
-MEMORIA:
-{memory_text}
+    # Construir grafo
+    nodes = [{"id": "cerebro", "label": "Cerebro", "main": True}]
+    edges = []
+    node_ids = {"cerebro"}
 
-Devolvé SOLO un JSON válido, sin texto adicional:
-{{
-  "nodes": [
-    {{"id": "cerebro", "label": "Cerebro", "main": true}},
-    {{"id": "tema1", "label": "Arquitectura de Software", "main": true}},
-    {{"id": "concepto1", "label": "Concepto compartido", "sub": true, "parent": "tema1"}}
-  ],
-  "edges": [
-    {{"from": "cerebro", "to": "tema1"}},
-    {{"from": "tema1", "to": "concepto1"}},
-    {{"from": "tema1", "to": "tema2"}}
-  ]
-}}
+    # Nodos principales por TEMA
+    for tema in sections:
+        tid = f"tema_{tema}"
+        nodes.append({"id": tid, "label": tema.capitalize(), "main": True})
+        edges.append({"from": "cerebro", "to": tid})
+        node_ids.add(tid)
 
-Reglas ESTRICTAS:
-- Nodo central: id "cerebro", label "Cerebro"
-- OBLIGATORIO: creá exactamente un nodo main por cada tema de la lista, con ese nombre exacto como label
-- Conectá cerebro con todos los nodos principales
-- Buscá 2-4 conceptos que aparezcan en múltiples temas y hacelos subnodos conectados a todos esos temas
-- Conectá directamente los temas que comparten muchos conceptos
-- Labels cortos (1-3 palabras)
-- Solo JSON, sin markdown"""
+    # Subnodos exclusivos de cada tema (no compartidos)
+    for tema, kws in tema_keywords.items():
+        tid = f"tema_{tema}"
+        for kw in kws:
+            if kw not in shared_concepts:
+                kid = f"kw_{kw}"
+                if kid not in node_ids:
+                    nodes.append({"id": kid, "label": kw, "sub": True})
+                    node_ids.add(kid)
+                edges.append({"from": tid, "to": kid})
 
-    try:
-        model = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        res = requests.post(
-            url,
-            params={"key": api_key},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=30,
-        )
-        res.raise_for_status()
-        gemini_json = res.json()
-        if not gemini_json.get("candidates"):
-            raise HTTPException(status_code=500, detail=f"Gemini sin candidates: {gemini_json}")
-        text = gemini_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-        # Limpiar markdown si viene
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        import json
-        graph = json.loads(text)
-        return graph
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print("GRAPH ERROR:", tb)
-        raise HTTPException(status_code=500, detail=tb)
+    # Nodos compartidos — conectados a todos los temas donde aparecen
+    for kw, temas in shared_concepts.items():
+        kid = f"kw_{kw}"
+        if kid not in node_ids:
+            nodes.append({"id": kid, "label": kw, "sub": True, "shared": True})
+            node_ids.add(kid)
+        for tema in temas:
+            edges.append({"from": f"tema_{tema}", "to": kid})
+
+    # Conectar temas que comparten 3+ keywords
+    tema_list = list(sections.keys())
+    for i in range(len(tema_list)):
+        for j in range(i + 1, len(tema_list)):
+            shared = set(tema_keywords.get(tema_list[i], [])) & set(tema_keywords.get(tema_list[j], []))
+            if len(shared) >= 3:
+                edges.append({"from": f"tema_{tema_list[i]}", "to": f"tema_{tema_list[j]}"})
+
+    return {"nodes": nodes, "edges": edges}
