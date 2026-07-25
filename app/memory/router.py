@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v7
+router = APIRouter(prefix="/memory", tags=["memory"])  # v8
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -158,33 +158,33 @@ async def memory_graph(user: dict = Depends(require_auth)):
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY no configurada")
 
-    prompt = f"""Analizá esta memoria personal y extraé un grafo de conceptos.
+    prompt = f"""Analizá esta memoria personal organizada por temas y generá un grafo de conexiones.
 
-MEMORIA:
+MEMORIA (cada sección entre [] es un tema):
 {memory_text}
 
 Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional:
 {{
   "nodes": [
     {{"id": "cerebro", "label": "Cerebro", "main": true}},
-    {{"id": "nodo1", "label": "Nombre corto", "main": false}},
-    {{"id": "subnodo1", "label": "Concepto", "sub": true, "parent": "nodo1"}}
+    {{"id": "tema1", "label": "Nombre del tema", "main": true}},
+    {{"id": "concepto1", "label": "Concepto compartido", "sub": true, "parent": "tema1"}}
   ],
   "edges": [
-    {{"from": "cerebro", "to": "nodo1"}},
-    {{"from": "nodo1", "to": "subnodo1"}}
+    {{"from": "cerebro", "to": "tema1"}},
+    {{"from": "tema1", "to": "concepto1"}},
+    {{"from": "tema1", "to": "tema2"}}
   ]
 }}
 
 Reglas:
-- Siempre incluir el nodo central con id "cerebro" y label "Cerebro"
-- 5 a 8 nodos principales (main: true) con temas importantes de la memoria
-- 3 a 5 subnodos por nodo principal (sub: true) con conceptos específicos encontrados
-- Conectar cerebro con todos los nodos principales
-- Conectar nodos principales entre sí si comparten ideas
-- Conectar cada subnodo con su nodo padre
-- Los labels deben ser cortos (1-3 palabras máximo)
-- Solo JSON, sin markdown, sin explicaciones"""
+- Nodo central: id "cerebro", label "Cerebro"
+- Un nodo principal (main: true) por cada tema entre [] en la memoria — usá exactamente ese nombre como label
+- Conectá cerebro con todos los nodos principales
+- Buscá conceptos, hábitos, proyectos o ideas que aparezcan en MÁS DE UN tema — esos son subnodos compartidos, conectalos a todos los temas donde aparecen
+- Conectá directamente los nodos principales que comparten muchos conceptos
+- Labels cortos (1-3 palabras)
+- Solo JSON, sin markdown"""
 
     try:
         model = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
