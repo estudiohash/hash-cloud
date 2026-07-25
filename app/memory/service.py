@@ -100,73 +100,21 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str
         create_user(user_id)
 
     import time
-
-    topics = _split_into_topics_with_llm(content)
-
-    if topics:
-        docs_created = 0
-        rows_added = 0
-        for topic in topics:
-            name = topic.get("name", "Sin nombre")[:80]
-            topic_content = topic.get("content", "").strip()
-            if not topic_content:
-                continue
-            key = name.lower().replace(" ", "_")[:60] + "_" + str(int(time.time()))
-            document_id, created = get_or_create_document(user_id, key, name, f"Tema extraído de {filename}", chat_id=chat_id)
-            add_row(document_id, {"message": topic_content}, with_embedding=True)
-            if created:
-                docs_created += 1
-            rows_added += 1
-        return {"documents_created": docs_created, "rows_added": rows_added, "split_by": "llm"}
-
-    # Fallback: un solo documento
+    # Clave única por timestamp para no pisar archivos anteriores del mismo nombre
     key = filename.replace(".txt", "").replace(" ", "_").lower() + "_" + str(int(time.time()))
     name = filename.replace(".txt", "")
-    document_id, created = get_or_create_document(user_id, key, name, f"Cargado desde {filename}", chat_id=chat_id)
+    description = f"Cargado desde archivo: {filename}"
+
+    document_id, created = get_or_create_document(user_id, key, name, description, chat_id=chat_id)
+
+    # Dividir en chunks de ~1600 líneas (~250KB) y guardar cada uno con embedding
     lines = content.strip().splitlines()
-    chunks = [lines[i:i+1600] for i in range(0, len(lines), 1600)]
+    chunk_size = 1600
+    chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
+
     for chunk in chunks:
-        chunk_text = "\n".join(chunk).strip()
+        chunk_text = '\n'.join(chunk).strip()
         if chunk_text:
             add_row(document_id, {"message": chunk_text}, with_embedding=True)
-    return {"document": key, "created": created, "rows_added": len(chunks), "split_by": "fallback"}
 
-
-
-def _split_into_topics_with_llm(content: str) -> list | None:
-    import os, requests, json
-    api_key = os.getenv("GEMINI_API_KEY")
-    model = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
-    if not api_key:
-        return None
-    prompt = f"""Analizá este texto y dividilo en temas principales.
-
-TEXTO:
-{content[:12000]}
-
-Devolvé SOLO un JSON válido, sin texto adicional:
-[
-  {{"name": "Nombre del tema", "content": "Todo el contenido relevante de ese tema"}},
-  {{"name": "Otro tema", "content": "Contenido..."}}
-]
-
-Reglas:
-- Entre 3 y 10 temas
-- Nombres cortos (1-3 palabras)
-- Incluí todo el contenido original en algún tema, sin perder información
-- Solo JSON, sin markdown"""
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        res = requests.post(url, params={"key": api_key}, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
-        res.raise_for_status()
-        gemini = res.json()
-        if not gemini.get("candidates"):
-            return None
-        text = gemini["candidates"][0]["content"]["parts"][0]["text"].strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text)
-    except Exception:
-        return None
+    return {"document": key, "created": created, "rows_added": len(chunks)}
