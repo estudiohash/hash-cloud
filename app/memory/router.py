@@ -173,14 +173,39 @@ async def memory_graph(user: dict = Depends(require_auth)):
             for doc in documents
         }
 
-    def extract_keywords(text: str, top_n: int = 8) -> list[str]:
-        words = re.findall(r'\b[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{4,}\b', text.lower())
-        words = [w for w in words if w not in STOPWORDS]
-        return [w for w, _ in Counter(words).most_common(top_n)]
+    FIRMA_PATTERNS = [
+        r"No conf[ií]o en que sea[^.]*\.",
+        r"No me como los mocos[^.]*\.",
+        r"Motor potente[^.]*\.",
+        r"memoria viva rebelde[^.]*\.",
+        r"Se termin[oó] el teatro[^.]*\.",
+        r"Soy esto ahora[^.]*\.",
+        r"Sigo rompiendo[^.]*\.",
+    ]
+    NOISE_WORDS = {"mocos", "motor", "rebelde", "tesla", "teatro", "glitch", "hdp", "orto", "posta", "potente", "rompiendo", "viva"}
 
-    # Keywords por tema
+    def clean_text(text: str) -> str:
+        for pat in FIRMA_PATTERNS:
+            text = re.sub(pat, "", text, flags=re.IGNORECASE)
+        return text
+
+    def extract_concepts(text: str, top_n: int = 8) -> list[str]:
+        text = clean_text(text)
+        words = re.findall(r'\b[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{3,}\b', text.lower())
+        words = [w for w in words if w not in STOPWORDS]
+        bigrams = [f"{words[i]} {words[i+1]}" for i in range(len(words) - 1)]
+        bigrams = [bg for bg in bigrams if not any(n in bg for n in NOISE_WORDS)]
+        top_bigrams = [bg for bg, c in Counter(bigrams).most_common(top_n * 2) if c >= 2]
+        selected = top_bigrams[:top_n]
+        if len(selected) < 4:
+            for w, _ in Counter(words).most_common(top_n):
+                if w not in " ".join(selected) and len(selected) < top_n:
+                    selected.append(w)
+        return selected[:top_n]
+
+    # Conceptos por tema
     tema_keywords: dict[str, list[str]] = {
-        tema: extract_keywords(texto)
+        tema: extract_concepts(texto)
         for tema, texto in sections.items()
     }
 
