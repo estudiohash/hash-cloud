@@ -4,7 +4,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-NVIDIA_API_KEY = os.getenv("NVIDIABuild-Autogen-49")
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/embeddings"
 NVIDIA_MODEL = "nvidia/nv-embedqa-e5-v5"
 
