@@ -20,7 +20,7 @@ FREE_MESSAGE_LIMIT = 10
 
 def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
     """Trae toda la memoria, desencripta en Python y filtra por palabras clave."""
-    words = [w.strip().lower() for w in query.split() if len(w.strip()) > 3]
+    words = [w.strip().lower() for w in query.split() if w.strip()]
     if not words:
         return ""
     try:
@@ -60,7 +60,9 @@ def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
             fragment = msg[start:end].strip()
             lines.append(f"[{r['name']}]\n{fragment}")
         return "\n\n".join(lines)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"_search_memory error: {e}")
         return ""
 
 
