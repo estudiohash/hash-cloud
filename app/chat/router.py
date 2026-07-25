@@ -69,7 +69,6 @@ def _search_memory(user_id: str, query: str) -> str:
 
 
 def _build_system_prompt(user_id: str, query: str = "") -> str:
-    print(f">>> _build_system_prompt called, query len: {len(query)}", flush=True)
     sources = get_hash_sources()
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
@@ -306,7 +305,22 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-# ── Voz ──────────────────────────────────────────────────────────────────────
+# ── Debug ───────────────────────────────────────────────────────────────────
+
+@router.get("/debug/memory")
+def debug_memory(user: dict = Depends(require_auth)):
+    """Muestra cuánto texto de memoria se está mandando al LLM."""
+    test_query = "test"
+    memory_text = _search_memory(user["id"], test_query)
+    system_prompt = _build_system_prompt(user["id"], test_query)
+    return {
+        "memory_chars": len(memory_text),
+        "memory_preview": memory_text[:300] if memory_text else "(vacío)",
+        "total_prompt_chars": len(system_prompt),
+    }
+
+
+# ── Voz ──────────────────────────────────────────────────────────────────────────
 
 @router.post("/synthesize")
 def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
