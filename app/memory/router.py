@@ -201,4 +201,5 @@ Reglas:
         graph = json.loads(text)
         return graph
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando grafo: {e}")
+        import traceback
+        raise HTTPException(status_code=500, detail=traceback.format_exc())
