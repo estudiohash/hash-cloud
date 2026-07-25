@@ -201,4 +201,6 @@ Reglas:
         graph = json.loads(text)
         return graph
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(f"Error en /memory/graph: {e}")
         raise HTTPException(status_code=500, detail=f"Error generando grafo: {e}")
