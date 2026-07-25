@@ -13,7 +13,7 @@ from app.memory.service import (
 )
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/memory", tags=["memory"])  # v8
+router = APIRouter(prefix="/memory", tags=["memory"])  # v9
 
 MEMORY_ERRORS = {
     "not_found":     (status.HTTP_404_NOT_FOUND,  "Memoria no encontrada"),
@@ -158,16 +158,20 @@ async def memory_graph(user: dict = Depends(require_auth)):
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY no configurada")
 
-    prompt = f"""Analizá esta memoria personal organizada por temas y generá un grafo de conexiones.
+    temas_lista = "\n".join(f"- {n}" for n in doc_names)
+    prompt = f"""Analizá esta memoria y generá un grafo de conexiones.
 
-MEMORIA (cada sección entre [] es un tema):
+TEMAS OBLIGATORIOS (cada uno DEBE ser un nodo principal):
+{temas_lista}
+
+MEMORIA:
 {memory_text}
 
-Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional:
+Devolvé SOLO un JSON válido, sin texto adicional:
 {{
   "nodes": [
     {{"id": "cerebro", "label": "Cerebro", "main": true}},
-    {{"id": "tema1", "label": "Nombre del tema", "main": true}},
+    {{"id": "tema1", "label": "Arquitectura de Software", "main": true}},
     {{"id": "concepto1", "label": "Concepto compartido", "sub": true, "parent": "tema1"}}
   ],
   "edges": [
@@ -177,12 +181,12 @@ Devolvé SOLO un JSON válido con esta estructura exacta, sin texto adicional:
   ]
 }}
 
-Reglas:
+Reglas ESTRICTAS:
 - Nodo central: id "cerebro", label "Cerebro"
-- Un nodo principal (main: true) por cada tema entre [] en la memoria — usá exactamente ese nombre como label
+- OBLIGATORIO: creá exactamente un nodo main por cada tema de la lista, con ese nombre exacto como label
 - Conectá cerebro con todos los nodos principales
-- Buscá conceptos, hábitos, proyectos o ideas que aparezcan en MÁS DE UN tema — esos son subnodos compartidos, conectalos a todos los temas donde aparecen
-- Conectá directamente los nodos principales que comparten muchos conceptos
+- Buscá 2-4 conceptos que aparezcan en múltiples temas y hacelos subnodos conectados a todos esos temas
+- Conectá directamente los temas que comparten muchos conceptos
 - Labels cortos (1-3 palabras)
 - Solo JSON, sin markdown"""
 
