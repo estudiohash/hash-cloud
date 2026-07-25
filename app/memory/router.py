@@ -182,7 +182,7 @@ Reglas:
 - Solo JSON, sin markdown, sin explicaciones"""
 
     try:
-        model = "gemini-2.0-flash-lite"
+        model = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         res = requests.post(
             url,
