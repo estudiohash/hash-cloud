@@ -222,10 +222,10 @@ async def memory_graph(user: dict = Depends(require_auth)):
     edges = []
     node_ids = {"cerebro"}
 
-    # Nodos principales por TEMA
+    # Nodos de TEMA — van al anillo del medio (sin main ni sub)
     for tema in sections:
         tid = f"tema_{tema}"
-        nodes.append({"id": tid, "label": tema.capitalize(), "main": True})
+        nodes.append({"id": tid, "label": tema.capitalize()})
         edges.append({"from": "cerebro", "to": tid})
         node_ids.add(tid)
 
