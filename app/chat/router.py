@@ -64,7 +64,7 @@ def _search_memory(user_id: str, query: str) -> str:
             msg = decrypt(msg)
         except Exception:
             pass
-        lines.append(f"[{r['name']}]\n{msg.strip()}")
+        lines.append(f"[{r['name']}]\n{msg.strip()[:500]}")
     return "\n\n".join(lines)
 
 
