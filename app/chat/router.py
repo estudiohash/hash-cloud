@@ -19,20 +19,23 @@ FREE_MESSAGE_LIMIT = 10
 
 
 def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
-    """Busca en memory_rows desencriptando primero, luego filtrando por palabras clave."""
+    """Busca en toda la memoria filtrando por palabras clave directamente en SQL."""
     words = [w.strip() for w in query.split() if len(w.strip()) > 3]
     if not words:
         return ""
     try:
+        # Construir condición ILIKE para cada palabra
+        conditions = " OR ".join(["mr.data::text ILIKE %s"] * len(words))
+        params = [user_id] + [f"%{w}%" for w in words] + [limit]
         with get_cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT md.name, mr.data
                 FROM memory_rows mr
                 JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s
+                WHERE md.user_id = %s AND ({conditions})
                 ORDER BY mr.created_at DESC
-                LIMIT 200
-            """, [user_id])
+                LIMIT %s
+            """, params)
             rows = cur.fetchall()
         if not rows:
             return ""
@@ -46,8 +49,6 @@ def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
             except Exception:
                 pass
             lower_msg = msg.lower()
-            if not any(w.lower() in lower_msg for w in words):
-                continue
             pos = -1
             for w in words:
                 p = lower_msg.find(w.lower())
@@ -61,8 +62,6 @@ def _search_memory(user_id: str, query: str, limit: int = 20) -> str:
             else:
                 fragment = msg[:400].strip()
             lines.append(f"[{r['name']}]\n{fragment}")
-            if len(lines) >= limit:
-                break
         return "\n\n".join(lines)
     except Exception:
         return ""
