@@ -68,8 +68,8 @@ def _search_memory(user_id: str, query: str) -> str:
     return "\n\n".join(lines)
 
 
-def _build_system_prompt(user_id: str, query: str = "") -> str:
-    sources = get_hash_sources()
+def _build_system_prompt(user_id: str, query: str = "", mode: str = "conspiranoico") -> str:
+    sources = get_hash_sources(mode)
     base_context = compile_base_context(sources)
     style_context = compile_style_context(sources)
 
@@ -253,7 +253,8 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
                 repo.update_chat_title(chat_id, user["id"], auto_title)
 
         query = last_user_msg.content if last_user_msg else ""
-        system_prompt = _build_system_prompt(user["id"], query)
+        mode = getattr(body, "mode", "conspiranoico") or "conspiranoico"
+        system_prompt = _build_system_prompt(user["id"], query, mode)
         messages = [{"role": "system", "content": system_prompt}] + [m.model_dump() for m in body.messages]
         llm = get_llm_provider()
 
