@@ -37,6 +37,9 @@ class GroqProvider(LLMProvider):
             "stream": False,
         }
         response = httpx.post(GROQ_API_URL, headers=self._headers(), json=body, timeout=60)
+        if not response.is_success:
+            import logging
+            logging.getLogger(__name__).error(f"Groq error body: {response.text}")
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]
