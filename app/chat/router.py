@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse, Response
 from app.core.jwt import require_auth
 from app.voice.factory import get_voice_provider
@@ -336,7 +336,63 @@ def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-@router.post("/synthesize/stream")
+@router.post("/voice")
+async def voice_chat(
+    audio: UploadFile = File(...),
+    chat_id: str = None,
+    user: dict = Depends(require_auth),
+):
+    """Recibe audio → transcribe → responde → devuelve audio."""
+    try:
+        from app.llm.groq import GroqProvider
+        groq = GroqProvider()
+
+        # 1. Transcribir voz a texto
+        audio_bytes = await audio.read()
+        transcript = groq.transcribe(audio_bytes, filename=audio.filename or "audio.webm")
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No se pudo transcribir el audio")
+
+        # 2. Crear chat si no viene chat_id
+        if not chat_id:
+            new = repo.create_chat(user["id"])
+            chat_id = new["chat_id"]
+
+        # 3. Guardar mensaje del usuario
+        repo.save_message(chat_id, "user", transcript)
+        save_message_to_memory(user["id"], "user", transcript)
+
+        # 4. Generar respuesta
+        system_prompt = _build_system_prompt(user["id"], transcript)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": transcript},
+        ]
+        reply = groq.generate(messages)
+
+        # 5. Guardar respuesta
+        repo.save_message(chat_id, "assistant", reply)
+        save_message_to_memory(user["id"], "assistant", reply)
+
+        # 6. Sintetizar respuesta a audio
+        voice = get_voice_provider()
+        audio_reply = voice.synthesize(reply)
+
+        return Response(
+            content=audio_reply,
+            media_type="audio/mpeg",
+            headers={
+                "X-Transcript": transcript,
+                "X-Reply": reply,
+                "X-Chat-Id": chat_id,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error en /chat/voice")
+        raise HTTPException(status_code=500, detail="Error en chat de voz")
 def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
         voice = get_voice_provider()

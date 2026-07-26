@@ -5,6 +5,7 @@ from typing import Iterator
 from app.llm.provider import LLMProvider
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_WHISPER_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 
 class GroqProvider(LLMProvider):
@@ -20,6 +21,14 @@ class GroqProvider(LLMProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
+    def transcribe(self, audio_bytes: bytes, filename: str = "audio.webm") -> str:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        files = {"file": (filename, audio_bytes, "audio/webm")}
+        data = {"model": "whisper-large-v3-turbo", "language": "es"}
+        response = httpx.post(GROQ_WHISPER_URL, headers=headers, files=files, data=data, timeout=30)
+        response.raise_for_status()
+        return response.json().get("text", "").strip()
 
     def generate(self, messages: list[dict]) -> str:
         body = {
