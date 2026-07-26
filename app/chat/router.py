@@ -362,10 +362,19 @@ async def voice_chat(
         repo.save_message(chat_id, "user", transcript)
         save_message_to_memory(user["id"], "user", transcript)
 
-        # 4. Generar respuesta
-        system_prompt = _build_system_prompt(user["id"], transcript)
+        # 4. Generar respuesta (prompt liviano para voz)
+        import os as _os
+        memory_text = _search_memory(user["id"], transcript)
+        sources = get_hash_sources()
+        base = compile_base_context(sources)
+        voice_system = (
+            f"Fecha: {base['fecha_actual']}\n\n"
+            + (f"Memoria relevante:\n{memory_text[:1500]}\n\n" if memory_text else "")
+            + f"Identidad:\n{base['sources']['cognitive_base'][:1000]}"
+        )
+        groq.model = _os.getenv("GROQ_VOICE_MODEL", "llama3-70b-8192")
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": voice_system},
             {"role": "user", "content": transcript},
         ]
         reply = groq.generate(messages)
