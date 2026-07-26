@@ -362,19 +362,11 @@ async def voice_chat(
         repo.save_message(chat_id, "user", transcript)
         save_message_to_memory(user["id"], "user", transcript)
 
-        # 4. Generar respuesta (prompt liviano para voz)
-        import os as _os
-        memory_text = _search_memory(user["id"], transcript)
-        sources = get_hash_sources()
-        base = compile_base_context(sources)
-        voice_system = (
-            f"Fecha: {base['fecha_actual']}\n\n"
-            + (f"Memoria relevante:\n{memory_text[:1500]}\n\n" if memory_text else "")
-            + f"Identidad:\n{base['sources']['cognitive_base'][:1000]}"
-        )
-        groq.model = _os.getenv("GROQ_VOICE_MODEL", "llama3-70b-8192")
+        # 4. Generar respuesta
+        system_prompt = _build_system_prompt(user["id"], transcript)
+        groq.model = "llama-3.3-70b-versatile"
         messages = [
-            {"role": "system", "content": voice_system},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": transcript},
         ]
         reply = groq.generate(messages)
@@ -383,19 +375,13 @@ async def voice_chat(
         repo.save_message(chat_id, "assistant", reply)
         save_message_to_memory(user["id"], "assistant", reply)
 
-        # 6. Sintetizar respuesta a audio
-        voice = get_voice_provider()
-        audio_reply = voice.synthesize(reply)
-
-        return Response(
-            content=audio_reply,
-            media_type="audio/mpeg",
-            headers={
-                "X-Transcript": transcript,
-                "X-Reply": reply,
-                "X-Chat-Id": chat_id,
-            },
-        )
+        # 6. Devolver solo texto (el navegador reproduce el audio)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content={
+            "transcript": transcript,
+            "reply": reply,
+            "chat_id": chat_id,
+        })
     except HTTPException:
         raise
     except Exception as e:
