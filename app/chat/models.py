@@ -12,6 +12,7 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     provider: str | None = None
     chat_id: str | None = None  # Si viene, agrega al chat existente
+    mode: str | None = "conspiranoico"
 
 
 class SynthesizeRequest(BaseModel):
