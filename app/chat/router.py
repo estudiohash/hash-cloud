@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from app.core.jwt import require_auth
 from app.voice.factory import get_voice_provider
@@ -340,7 +340,7 @@ def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
 @router.post("/voice")
 async def voice_chat(
     audio: UploadFile = File(...),
-    chat_id: str = None,
+    chat_id: str = Form(None),
     user: dict = Depends(require_auth),
 ):
     """Recibe audio → transcribe → responde → devuelve audio."""
