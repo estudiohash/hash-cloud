@@ -1,11 +1,39 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
+import re
 
 from app.auth.dependencies import require_auth
 from app.core.database import get_cursor_dep
 from . import service
+from . import repository as repo
 
 router = APIRouter(prefix="/commerce", tags=["commerce"])
+
+
+# ── Setup (crea company + store en un paso) ────────────────
+
+@router.post("/setup")
+def setup(data: dict, user=Depends(require_auth), cursor=Depends(get_cursor_dep)):
+    """Crea company + store en un solo paso. Si ya existe, actualiza la store."""
+    store_name = data.get("store_name", "").strip()
+    if not store_name:
+        raise HTTPException(status_code=400, detail="El nombre de la tienda es obligatorio.")
+
+    company = repo.get_company_by_user(cursor, user["id"])
+    if not company:
+        slug = re.sub(r"[^a-z0-9]+", "-", store_name.lower()).strip("-") or "tienda"
+        base_slug = slug
+        suffix = 0
+        while True:
+            cursor.execute("SELECT 1 FROM commerce_companies WHERE slug = %s", [slug])
+            if not cursor.fetchone():
+                break
+            suffix += 1
+            slug = f"{base_slug}-{suffix}"
+        company = repo.create_company(cursor, user["id"], {"name": store_name, "slug": slug})
+
+    store = repo.upsert_store(cursor, company["id"], {"display_name": store_name})
+    return {**dict(store), "company_id": str(company["id"])}
 
 
 # ── Companies ──────────────────────────────────────────────
