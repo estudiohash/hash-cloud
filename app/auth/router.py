@@ -24,7 +24,7 @@ oauth.register(
 _DESTINOS = {
     "ai":       "https://hash-ia.site",
     "job":      "https://hash-ia.site",
-    "commerce": "https://hash-commerce-inky.vercel.app",
+    "commerce": "https://hashcommerce.site",
 }
 
 
