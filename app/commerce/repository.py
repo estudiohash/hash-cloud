@@ -120,35 +120,45 @@ def get_product(cursor, company_id: str, product_id: str):
 
 
 def create_product(cursor, company_id: str, data: dict):
+    imgs = data.get("images") or []
+    url1 = imgs[0] if len(imgs) > 0 else data.get("image_url")
+    url2 = imgs[1] if len(imgs) > 1 else None
+    url3 = imgs[2] if len(imgs) > 2 else None
     cursor.execute(
         """
         INSERT INTO commerce_products
-            (company_id, category_id, name, slug, description, price, stock, image_url, active)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, category_id, name, slug, description, price, stock,
+             image_url, image_url_2, image_url_3, active)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         (
             company_id, data.get("category_id"), data["name"], data["slug"],
             data.get("description"), data["price"], data.get("stock", 0),
-            data.get("image_url"), data.get("active", True)
+            url1, url2, url3, data.get("active", True)
         )
     )
     return cursor.fetchone()
 
 
 def update_product(cursor, company_id: str, product_id: str, data: dict):
+    imgs = data.get("images") or []
+    url1 = imgs[0] if len(imgs) > 0 else data.get("image_url")
+    url2 = imgs[1] if len(imgs) > 1 else None
+    url3 = imgs[2] if len(imgs) > 2 else None
     cursor.execute(
         """
         UPDATE commerce_products SET
             category_id = %s, name = %s, slug = %s, description = %s,
-            price = %s, stock = %s, image_url = %s, active = %s, updated_at = NOW()
+            price = %s, stock = %s, image_url = %s, image_url_2 = %s, image_url_3 = %s,
+            active = %s, updated_at = NOW()
         WHERE id = %s AND company_id = %s
         RETURNING *
         """,
         (
             data.get("category_id"), data["name"], data["slug"],
             data.get("description"), data["price"], data.get("stock", 0),
-            data.get("image_url"), data.get("active", True),
+            url1, url2, url3, data.get("active", True),
             product_id, company_id
         )
     )
