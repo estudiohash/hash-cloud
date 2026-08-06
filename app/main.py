@@ -11,6 +11,7 @@ from app.memory.router import router as memory_router
 from app.compiler.router import router as compiler_router
 from app.chat.router import router as chat_router
 from app.job.router import router as job_router
+from app.commerce.router import router as commerce_router
 from app.payment_monitor import monitor_loop
 from app.paypal_webhook import router as paypal_router
 from app.mercadopago_webhook import router as mp_router
@@ -74,6 +75,7 @@ app.include_router(chat_router)
 app.include_router(job_router)
 app.include_router(paypal_router)
 app.include_router(mp_router)
+app.include_router(commerce_router)
 
 
 @app.get("/health")

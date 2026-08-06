@@ -92,3 +92,112 @@ def init_db() -> None:
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_memory_documents_user ON memory_documents(user_id);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_memory_rows_document ON memory_rows(document_id);")
+
+            # ── Commerce ───────────────────────────────────────────────────────────
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_companies (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    owner_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_stores (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL UNIQUE REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    display_name TEXT,
+                    description TEXT,
+                    currency TEXT NOT NULL DEFAULT 'ARS',
+                    logo_url TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_categories (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (company_id, slug)
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_products (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    category_id UUID REFERENCES commerce_categories(id) ON DELETE SET NULL,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    description TEXT,
+                    price NUMERIC(12, 2) NOT NULL,
+                    stock INTEGER NOT NULL DEFAULT 0,
+                    image_url TEXT,
+                    active BOOLEAN NOT NULL DEFAULT true,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (company_id, slug)
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_customers (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    email TEXT NOT NULL,
+                    name TEXT,
+                    phone TEXT,
+                    address TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (company_id, email)
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_orders (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    customer_id UUID REFERENCES commerce_customers(id) ON DELETE SET NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    total NUMERIC(12, 2) NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_order_items (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    order_id UUID NOT NULL REFERENCES commerce_orders(id) ON DELETE CASCADE,
+                    product_id UUID REFERENCES commerce_products(id) ON DELETE SET NULL,
+                    quantity INTEGER NOT NULL,
+                    unit_price NUMERIC(12, 2) NOT NULL
+                );
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commerce_connectors (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    company_id UUID NOT NULL REFERENCES commerce_companies(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    credentials JSONB NOT NULL DEFAULT '{}',
+                    active BOOLEAN NOT NULL DEFAULT true,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (company_id, provider)
+                );
+            """)
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_commerce_products_company ON commerce_products(company_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_commerce_orders_company ON commerce_orders(company_id);")
