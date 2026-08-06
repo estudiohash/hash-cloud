@@ -22,8 +22,9 @@ oauth.register(
 
 # Destinos válidos por app
 _DESTINOS = {
-    "ai":  "https://hash-ia.site",
-    "job": "https://hash-ia.site",
+    "ai":       "https://hash-ia.site",
+    "job":      "https://hash-ia.site",
+    "commerce": "https://hash-commerce-inky.vercel.app",
 }
 
 
