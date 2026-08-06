@@ -45,6 +45,9 @@ def list_categories(cursor, user_id: str):
 
 
 def create_category(cursor, user_id: str, data: dict):
+    import re
+    if not data.get("slug"):
+        data["slug"] = re.sub(r"[^a-z0-9]+", "-", data.get("name", "categoria").lower()).strip("-") or "categoria"
     company = _get_company_or_404(cursor, user_id)
     return repo.create_category(cursor, company["id"], data)
 
