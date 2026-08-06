@@ -13,3 +13,5 @@ psycopg2-binary==2.9.10
 requests
 python-multipart==0.0.20
 python-telegram-bot==21.11.1
+pypdf
+beautifulsoup4

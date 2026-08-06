@@ -10,11 +10,15 @@ from app.context.router import router as context_router
 from app.memory.router import router as memory_router
 from app.compiler.router import router as compiler_router
 from app.chat.router import router as chat_router
+from app.job.router import router as job_router
 from app.payment_monitor import monitor_loop
+from app.paypal_webhook import router as paypal_router
+from app.mercadopago_webhook import router as mp_router
 from app.support_bot import run_bot
 import asyncio
 import logging
 
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
@@ -44,7 +48,13 @@ app = FastAPI(title="HASH Cloud", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://hash-ai.vercel.app"],
+    allow_origins=[
+        "https://hash-ai.vercel.app",
+        "https://hash-phi-weld.vercel.app",
+        "https://hash-ia.site",
+        "https://www.hash-ia.site",
+        "https://hash-job.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +71,9 @@ app.include_router(context_router)
 app.include_router(memory_router)
 app.include_router(compiler_router)
 app.include_router(chat_router)
+app.include_router(job_router)
+app.include_router(paypal_router)
+app.include_router(mp_router)
 
 
 @app.get("/health")

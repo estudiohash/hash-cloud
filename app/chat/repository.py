@@ -149,7 +149,7 @@ def get_messages(chat_id: str, user_id: str) -> list[dict]:
 
 
 def count_user_messages(user_id: str) -> int:
-    """Cuenta todos los mensajes enviados por el usuario (role=user) en todos sus chats."""
+    """Cuenta los mensajes enviados por el usuario (role=user) en las últimas 24hs."""
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -157,6 +157,7 @@ def count_user_messages(user_id: str) -> int:
                 FROM chat_messages cm
                 JOIN chats c ON c.chat_id = cm.chat_id
                 WHERE c.user_id = %s AND cm.role = 'user'
+                AND cm.created_at >= NOW() - INTERVAL '24 hours'
             """, (user_id,))
             row = cur.fetchone()
     return row["total"] if row else 0

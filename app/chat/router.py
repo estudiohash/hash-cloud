@@ -16,7 +16,7 @@ import app.chat.repository as repo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-FREE_MESSAGE_LIMIT = 10
+FREE_MESSAGE_LIMIT = 20
 
 
 def _get_all_memory(user_id: str) -> str:
@@ -112,10 +112,14 @@ def new_chat(user: dict = Depends(require_auth)):
     # Límite plan free: 6 chats
     from app.core.database import get_cursor
     with get_cursor() as cur:
-        cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
-        row = cur.fetchone()
-        if row and row["total"] >= 6:
-            raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
+        cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+        u = cur.fetchone()
+    if u and u["plan"] == "free":
+        with get_cursor() as cur:
+            cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+            row = cur.fetchone()
+            if row and row["total"] >= 6:
+                raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
     chat = repo.create_chat(user["id"])
     return chat
 
@@ -172,9 +176,9 @@ def chat(body: ChatRequest, user: dict = Depends(require_auth)):
         with get_cursor() as cur:
             cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
             u = cur.fetchone()
-        if (not u or u["plan"] == "free"):
+        if u and u["plan"] == "free":
             if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
-                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 20)")
 
         # Guardar el mensaje del usuario
         last_user_msg = body.messages[-1] if body.messages else None
@@ -224,22 +228,25 @@ def chat_stream(body: ChatRequest, user: dict = Depends(require_auth)):
     try:
         # Límite plan free: 6 chats (antes de entrar al stream)
         chat_id = body.chat_id
+        with get_cursor() as cur:
+            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
+            u = cur.fetchone()
+        is_free = u and u["plan"] == "free"
+
         if not chat_id:
-            with get_cursor() as cur:
-                cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
-                row = cur.fetchone()
-                if row and row["total"] >= 6:
-                    raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
+            if is_free:
+                with get_cursor() as cur:
+                    cur.execute("SELECT COUNT(*) as total FROM chats WHERE user_id = %s", [user["id"]])
+                    row = cur.fetchone()
+                    if row and row["total"] >= 6:
+                        raise HTTPException(status_code=403, detail="Límite de chats alcanzado (plan free: 6)")
             new = repo.create_chat(user["id"])
             chat_id = new["chat_id"]
 
         # Límite de mensajes plan free
-        with get_cursor() as cur:
-            cur.execute("SELECT plan FROM memory_users WHERE user_id = %s", [user["id"]])
-            u = cur.fetchone()
-        if (not u or u["plan"] == "free"):
+        if is_free:
             if repo.count_user_messages(user["id"]) >= FREE_MESSAGE_LIMIT:
-                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 10)")
+                raise HTTPException(status_code=403, detail="Límite de mensajes alcanzado (plan free: 20)")
 
         # Guardar mensaje del usuario
         last_user_msg = body.messages[-1] if body.messages else None
@@ -363,16 +370,17 @@ async def voice_chat(
         repo.save_message(chat_id, "user", transcript)
         save_message_to_memory(user["id"], "user", transcript)
 
-        # 4. Generar respuesta
-        system_prompt = _build_system_prompt(user["id"], transcript)
-        groq.model = "llama-3.3-70b-versatile"
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": transcript},
-        ]
-        reply = groq.generate(messages)
+        # 4. Traer historial del chat
+        history = repo.get_messages(chat_id, user["id"])
 
-        # 5. Guardar respuesta
+        # 5. Generar respuesta con el proveedor normal (Gemini/Grok)
+        system_prompt = _build_system_prompt(user["id"], transcript)
+        llm = get_llm_provider()
+        messages = [{"role": "system", "content": system_prompt}]
+        messages += [{"role": m["role"], "content": m["content"]} for m in history]
+        reply = llm.generate(messages)
+
+        # 6. Guardar respuesta
         repo.save_message(chat_id, "assistant", reply)
         save_message_to_memory(user["id"], "assistant", reply)
 
