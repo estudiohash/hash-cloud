@@ -78,6 +78,9 @@ def get_product(cursor, user_id: str, product_id: str):
 
 
 def create_product(cursor, user_id: str, data: dict):
+    import re
+    if not data.get("slug"):
+        data["slug"] = re.sub(r"[^a-z0-9]+", "-", data.get("name", "producto").lower()).strip("-") or "producto"
     company = _get_company_or_404(cursor, user_id)
     return repo.create_product(cursor, company["id"], data)
 
