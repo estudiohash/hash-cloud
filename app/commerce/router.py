@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from typing import Optional
 import re
 
@@ -6,6 +6,7 @@ from app.auth.dependencies import require_auth
 from app.core.database import get_cursor_dep
 from . import service
 from . import repository as repo
+from .connectors.cloudinary import upload_image
 
 router = APIRouter(prefix="/commerce", tags=["commerce"])
 
@@ -14,7 +15,6 @@ router = APIRouter(prefix="/commerce", tags=["commerce"])
 
 @router.post("/setup")
 def setup(data: dict, user=Depends(require_auth), cursor=Depends(get_cursor_dep)):
-    """Crea company + store en un solo paso. Si ya existe, actualiza la store."""
     store_name = data.get("store_name", "").strip()
     if not store_name:
         raise HTTPException(status_code=400, detail="El nombre de la tienda es obligatorio.")
@@ -92,6 +92,17 @@ def list_products(
     cursor=Depends(get_cursor_dep)
 ):
     return service.list_products(cursor, user["id"], category_id)
+
+
+# ── Upload imagen (ANTES de /{product_id} para evitar conflicto) ──
+
+@router.post("/products/upload-image")
+async def upload_product_image(image: UploadFile = File(...), user=Depends(require_auth)):
+    try:
+        url = await upload_image(image)
+        return {"url": url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/products/{product_id}")
