@@ -29,11 +29,16 @@ def get_store(cursor, user_id: str):
     store = repo.get_store(cursor, company["id"])
     if not store:
         raise HTTPException(status_code=404, detail="Tienda no configurada.")
+    store = dict(store)
+    store.setdefault("store_name", store.get("display_name"))
     return store
 
 
 def upsert_store(cursor, user_id: str, data: dict):
     company = _get_company_or_404(cursor, user_id)
+    # Normalizar: el frontend manda store_name, el repo espera display_name
+    if "store_name" in data and "display_name" not in data:
+        data["display_name"] = data["store_name"]
     return repo.upsert_store(cursor, company["id"], data)
 
 
