@@ -41,6 +41,24 @@ def get_cursor():
             yield cur
 
 
+def get_cursor_dep():
+    """
+    Versión para FastAPI Depends().
+    Usa yield sin @contextmanager para que FastAPI pueda manejarlo como dependencia.
+    """
+    conn = _pool.getconn()
+    try:
+        conn.autocommit = False
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            yield cur
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _pool.putconn(conn)
+
+
 def init_db() -> None:
     """
     Crea las tablas si no existen. Se llama una vez al arrancar la app (main.py).
