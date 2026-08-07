@@ -189,12 +189,11 @@ def delete_connector(provider: str, user=Depends(require_auth), cursor=Depends(g
 
 # ── Tienda pública (sin auth) ──────────────────────────────
 
-@router.get("/public/{identifier}")
-def get_public_store(identifier: str, cursor=Depends(get_cursor_dep)):
-    # Busca por owner_id (ID de Google) primero, luego por slug
+@router.get("/public/{slug}")
+def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
     cursor.execute(
-        "SELECT id, name, slug FROM commerce_companies WHERE owner_id = %s OR slug = %s LIMIT 1",
-        [identifier, identifier]
+        "SELECT id, name, slug FROM commerce_companies WHERE slug = %s",
+        [slug]
     )
     company = cursor.fetchone()
     if not company:
@@ -202,33 +201,19 @@ def get_public_store(identifier: str, cursor=Depends(get_cursor_dep)):
 
     company_id = company["id"]
 
-    # Si el slug es NULL (usuarios anteriores al fix), generarlo y guardarlo
-    if not company.get("slug"):
-        import re as _re
-        base = _re.sub(r"[^a-z0-9]+", "-", (company["name"] or "tienda").lower()).strip("-") or "tienda"
-        slug = base
-        suffix = 0
-        while True:
-            cursor.execute("SELECT 1 FROM commerce_companies WHERE slug = %s AND id != %s", [slug, company_id])
-            if not cursor.fetchone():
-                break
-            suffix += 1
-            slug = f"{base}-{suffix}"
-        cursor.execute("UPDATE commerce_companies SET slug = %s WHERE id = %s", [slug, company_id])
-        company = dict(company)
-        company["slug"] = slug
-
     cursor.execute(
-        "SELECT display_name, logo_url, banner_url FROM commerce_stores WHERE company_id = %s",
+        "SELECT display_name, logo_url FROM commerce_stores WHERE company_id = %s",
         [company_id]
     )
     store = cursor.fetchone() or {}
 
     cursor.execute(
-        """SELECT id, name, price, stock, image_url, image_url_2, image_url_3, description
-           FROM commerce_products
-           WHERE company_id = %s AND active = true
-           ORDER BY created_at DESC""",
+        """SELECT p.id, p.name, p.price, p.stock, p.image_url, p.image_url_2, p.image_url_3,
+                  p.description, c.name as category_name
+           FROM commerce_products p
+           LEFT JOIN commerce_categories c ON c.id = p.category_id
+           WHERE p.company_id = %s AND p.active = true
+           ORDER BY c.name NULLS LAST, p.created_at DESC""",
         [company_id]
     )
     products = cursor.fetchall()
@@ -237,6 +222,5 @@ def get_public_store(identifier: str, cursor=Depends(get_cursor_dep)):
         "slug": company["slug"],
         "store_name": (store.get("display_name") if store else None) or company["name"],
         "logo_url": store.get("logo_url") if store else None,
-        "banner_url": store.get("banner_url") if store else None,
         "products": [dict(p) for p in products],
     }
