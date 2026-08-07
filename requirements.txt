@@ -15,4 +15,4 @@ python-multipart==0.0.20
 python-telegram-bot==21.11.1
 pypdf
 beautifulsoup4
-cloudinary
+Pillow

@@ -2,8 +2,9 @@ import os
 import uuid
 from pathlib import Path
 from fastapi import UploadFile, HTTPException
+from PIL import Image
+import io
 
-# Volumen Railway: montá el volumen en /data desde el dashboard
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -20,6 +21,13 @@ async def upload_image(file: UploadFile) -> str:
 
     if len(contents) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="La imagen supera el límite de 5MB.")
+
+    # Verificar que los bytes sean realmente una imagen
+    try:
+        img = Image.open(io.BytesIO(contents))
+        img.verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail="El archivo no es una imagen válida.")
 
     ext      = EXTENSIONS[file.content_type]
     filename = f"{uuid.uuid4().hex}{ext}"
