@@ -1,12 +1,25 @@
 import os
 import uuid
-from pathlib import Path
+import boto3
+from botocore.config import Config
 from fastapi import UploadFile, HTTPException
 from PIL import Image
 import io
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/data/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+R2_ACCESS_KEY_ID     = os.environ["R2_ACCESS_KEY_ID"]
+R2_SECRET_ACCESS_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
+R2_ACCOUNT_ID        = os.environ["R2_ACCOUNT_ID"]
+R2_BUCKET_NAME       = os.environ["R2_BUCKET_NAME"]
+R2_PUBLIC_URL        = os.environ["R2_PUBLIC_URL"].rstrip("/")
+
+s3 = boto3.client(
+    "s3",
+    endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+    aws_access_key_id=R2_ACCESS_KEY_ID,
+    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+    config=Config(signature_version="s3v4"),
+    region_name="auto",
+)
 
 MAX_SIZE = 5 * 1024 * 1024  # 5MB
 
@@ -22,7 +35,7 @@ async def upload_image(file: UploadFile) -> str:
     if len(contents) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="La imagen supera el límite de 5MB.")
 
-    # Verificar que los bytes sean realmente una imagen
+    # Verificar que sea realmente una imagen
     try:
         img = Image.open(io.BytesIO(contents))
         img.verify()
@@ -31,9 +44,12 @@ async def upload_image(file: UploadFile) -> str:
 
     ext      = EXTENSIONS[file.content_type]
     filename = f"{uuid.uuid4().hex}{ext}"
-    filepath = UPLOAD_DIR / filename
 
-    filepath.write_bytes(contents)
+    s3.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=filename,
+        Body=contents,
+        ContentType=file.content_type,
+    )
 
-    base_url = os.environ.get("API_BASE_URL", "https://hash-cloud-production.up.railway.app")
-    return f"{base_url}/uploads/{filename}"
+    return f"{R2_PUBLIC_URL}/{filename}"
