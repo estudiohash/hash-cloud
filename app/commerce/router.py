@@ -188,19 +188,35 @@ def delete_connector(provider: str, user=Depends(require_auth), cursor=Depends(g
 
 
 # ── Tienda pública (sin auth) ──────────────────────────────
-# Busca por owner_id (ID de Google) para evitar colisiones entre tiendas con el mismo nombre
 
-@router.get("/public/{owner_id}")
-def get_public_store(owner_id: str, cursor=Depends(get_cursor_dep)):
+@router.get("/public/{identifier}")
+def get_public_store(identifier: str, cursor=Depends(get_cursor_dep)):
+    # Busca por owner_id (ID de Google) primero, luego por slug
     cursor.execute(
-        "SELECT id, name, slug FROM commerce_companies WHERE owner_id = %s",
-        [owner_id]
+        "SELECT id, name, slug FROM commerce_companies WHERE owner_id = %s OR slug = %s LIMIT 1",
+        [identifier, identifier]
     )
     company = cursor.fetchone()
     if not company:
         raise HTTPException(status_code=404, detail="Tienda no encontrada")
 
     company_id = company["id"]
+
+    # Si el slug es NULL (usuarios anteriores al fix), generarlo y guardarlo
+    if not company.get("slug"):
+        import re as _re
+        base = _re.sub(r"[^a-z0-9]+", "-", (company["name"] or "tienda").lower()).strip("-") or "tienda"
+        slug = base
+        suffix = 0
+        while True:
+            cursor.execute("SELECT 1 FROM commerce_companies WHERE slug = %s AND id != %s", [slug, company_id])
+            if not cursor.fetchone():
+                break
+            suffix += 1
+            slug = f"{base}-{suffix}"
+        cursor.execute("UPDATE commerce_companies SET slug = %s WHERE id = %s", [slug, company_id])
+        company = dict(company)
+        company["slug"] = slug
 
     cursor.execute(
         "SELECT display_name, logo_url, banner_url FROM commerce_stores WHERE company_id = %s",
@@ -218,7 +234,6 @@ def get_public_store(owner_id: str, cursor=Depends(get_cursor_dep)):
     products = cursor.fetchall()
 
     return {
-        "owner_id": owner_id,
         "slug": company["slug"],
         "store_name": (store.get("display_name") if store else None) or company["name"],
         "logo_url": store.get("logo_url") if store else None,
