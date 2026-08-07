@@ -56,6 +56,8 @@ app.add_middleware(
         "https://www.hash-ia.site",
         "https://hash-job.vercel.app",
         "https://hash-commerce-inky.vercel.app",
+        "https://hashcommerce.site",
+        "https://www.hashcommerce.site",
     ],
     allow_credentials=True,
     allow_methods=["*"],
