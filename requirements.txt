@@ -16,3 +16,4 @@ python-telegram-bot==21.11.1
 pypdf
 beautifulsoup4
 Pillow
+boto3
