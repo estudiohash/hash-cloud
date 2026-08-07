@@ -202,7 +202,7 @@ def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
     company_id = company["id"]
 
     cursor.execute(
-        "SELECT display_name, logo_url FROM commerce_stores WHERE company_id = %s",
+        "SELECT display_name, logo_url, banner_url FROM commerce_stores WHERE company_id = %s",
         [company_id]
     )
     store = cursor.fetchone() or {}
@@ -222,5 +222,6 @@ def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
         "slug": company["slug"],
         "store_name": (store.get("display_name") if store else None) or company["name"],
         "logo_url": store.get("logo_url") if store else None,
+        "banner_url": store.get("banner_url") if store else None,
         "products": [dict(p) for p in products],
     }
