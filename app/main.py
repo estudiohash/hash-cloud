@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from starlette.middleware.sessions import SessionMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import SESSION_SECRET
@@ -81,6 +83,11 @@ app.include_router(paypal_router)
 app.include_router(mp_router)
 app.include_router(commerce_router)
 
+
+# Servir imágenes subidas al volumen
+UPLOAD_DIR = Path("/data/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 @app.get("/health")
 def health():
