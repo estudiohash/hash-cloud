@@ -59,6 +59,7 @@ app.add_middleware(
         "https://hashcommerce.site",
         "https://www.hashcommerce.site",
     ],
+    allow_origin_regex=r"https://.*\.hashcommerce\.site",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

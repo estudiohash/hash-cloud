@@ -11,44 +11,6 @@ from .connectors.cloudinary import upload_image
 router = APIRouter(prefix="/commerce", tags=["commerce"])
 
 
-# ── Tienda pública (sin auth) ──────────────────────────────
-
-@router.get("/public/{slug}")
-def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
-    cursor.execute(
-        "SELECT id, name, slug FROM commerce_companies WHERE slug = %s",
-        [slug]
-    )
-    company = cursor.fetchone()
-    if not company:
-        raise HTTPException(status_code=404, detail="Tienda no encontrada")
-
-    company_id = company["id"]
-
-    cursor.execute(
-        "SELECT name, logo_url, primary_color FROM commerce_store_config WHERE company_id = %s",
-        [company_id]
-    )
-    config = cursor.fetchone() or {}
-
-    cursor.execute(
-        """SELECT id, name, price, stock, image_url, description
-           FROM commerce_products
-           WHERE company_id = %s AND active = true
-           ORDER BY created_at DESC""",
-        [company_id]
-    )
-    products = cursor.fetchall()
-
-    return {
-        "slug": company["slug"],
-        "store_name": config.get("name") or company["name"],
-        "logo_url": config.get("logo_url"),
-        "primary_color": config.get("primary_color"),
-        "products": [dict(p) for p in products],
-    }
-
-
 # ── Setup (crea company + store en un paso) ────────────────
 
 @router.post("/setup")
@@ -223,3 +185,40 @@ def upsert_connector(provider: str, data: dict, user=Depends(require_auth), curs
 def delete_connector(provider: str, user=Depends(require_auth), cursor=Depends(get_cursor_dep)):
     service.delete_connector(cursor, user["id"], provider)
     return {"ok": True}
+
+
+# ── Tienda pública (sin auth) ──────────────────────────────
+
+@router.get("/public/{slug}")
+def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
+    cursor.execute(
+        "SELECT id, name, slug FROM commerce_companies WHERE slug = %s",
+        [slug]
+    )
+    company = cursor.fetchone()
+    if not company:
+        raise HTTPException(status_code=404, detail="Tienda no encontrada")
+
+    company_id = company["id"]
+
+    cursor.execute(
+        "SELECT display_name, logo_url FROM commerce_stores WHERE company_id = %s",
+        [company_id]
+    )
+    store = cursor.fetchone() or {}
+
+    cursor.execute(
+        """SELECT id, name, price, stock, image_url, image_url_2, image_url_3, description
+           FROM commerce_products
+           WHERE company_id = %s AND active = true
+           ORDER BY created_at DESC""",
+        [company_id]
+    )
+    products = cursor.fetchall()
+
+    return {
+        "slug": company["slug"],
+        "store_name": (store.get("display_name") if store else None) or company["name"],
+        "logo_url": store.get("logo_url") if store else None,
+        "products": [dict(p) for p in products],
+    }
