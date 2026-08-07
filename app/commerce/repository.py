@@ -37,18 +37,19 @@ def get_store(cursor, company_id: str):
 def upsert_store(cursor, company_id: str, data: dict):
     cursor.execute(
         """
-        INSERT INTO commerce_stores (company_id, display_name, description, currency, logo_url)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO commerce_stores (company_id, display_name, description, currency, logo_url, banner_url)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (company_id) DO UPDATE SET
             display_name = EXCLUDED.display_name,
             description  = EXCLUDED.description,
             currency     = EXCLUDED.currency,
             logo_url     = EXCLUDED.logo_url,
+            banner_url   = EXCLUDED.banner_url,
             updated_at   = NOW()
         RETURNING *
         """,
         (company_id, data.get("display_name"), data.get("description"),
-         data.get("currency", "ARS"), data.get("logo_url"))
+         data.get("currency", "ARS"), data.get("logo_url"), data.get("banner_url"))
     )
     return cursor.fetchone()
 
