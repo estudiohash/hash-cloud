@@ -188,12 +188,13 @@ def delete_connector(provider: str, user=Depends(require_auth), cursor=Depends(g
 
 
 # ── Tienda pública (sin auth) ──────────────────────────────
+# Busca por owner_id (ID de Google) para evitar colisiones entre tiendas con el mismo nombre
 
-@router.get("/public/{slug}")
-def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
+@router.get("/public/{owner_id}")
+def get_public_store(owner_id: str, cursor=Depends(get_cursor_dep)):
     cursor.execute(
-        "SELECT id, name, slug FROM commerce_companies WHERE slug = %s",
-        [slug]
+        "SELECT id, name, slug FROM commerce_companies WHERE owner_id = %s",
+        [owner_id]
     )
     company = cursor.fetchone()
     if not company:
@@ -202,7 +203,7 @@ def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
     company_id = company["id"]
 
     cursor.execute(
-        "SELECT display_name, logo_url FROM commerce_stores WHERE company_id = %s",
+        "SELECT display_name, logo_url, banner_url FROM commerce_stores WHERE company_id = %s",
         [company_id]
     )
     store = cursor.fetchone() or {}
@@ -217,8 +218,10 @@ def get_public_store(slug: str, cursor=Depends(get_cursor_dep)):
     products = cursor.fetchall()
 
     return {
+        "owner_id": owner_id,
         "slug": company["slug"],
         "store_name": (store.get("display_name") if store else None) or company["name"],
         "logo_url": store.get("logo_url") if store else None,
+        "banner_url": store.get("banner_url") if store else None,
         "products": [dict(p) for p in products],
     }

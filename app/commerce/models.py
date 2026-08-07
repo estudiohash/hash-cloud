@@ -20,8 +20,9 @@ def init_commerce_db() -> None:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS commerce_companies (
                     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    owner_id    TEXT NOT NULL,
+                    owner_id    TEXT NOT NULL UNIQUE,
                     name        TEXT NOT NULL,
+                    slug        TEXT NOT NULL UNIQUE,
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
             """)
@@ -39,9 +40,11 @@ def init_commerce_db() -> None:
 
             # ── Configuración de la tienda ────────────────────────────────────
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS commerce_store_config (
+                CREATE TABLE IF NOT EXISTS commerce_stores (
                     company_id       UUID PRIMARY KEY REFERENCES commerce_companies(id) ON DELETE CASCADE,
-                    name             TEXT,
+                    display_name     TEXT,
+                    description      TEXT,
+                    currency         TEXT NOT NULL DEFAULT 'ARS',
                     logo_url         TEXT,
                     favicon_url      TEXT,
                     banner_url       TEXT,
@@ -83,6 +86,8 @@ def init_commerce_db() -> None:
                     price        NUMERIC(12, 2) NOT NULL,
                     stock        INTEGER NOT NULL DEFAULT 0,
                     image_url    TEXT,
+                    image_url_2  TEXT,
+                    image_url_3  TEXT,
                     active       BOOLEAN NOT NULL DEFAULT true,
                     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
