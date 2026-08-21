@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
 from app.core.jwt import require_auth
 from app.voice.factory import get_voice_provider
@@ -420,3 +420,147 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
         logging.getLogger(__name__).exception("Error en synthesize")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
+
+# ── Chat de voz en tiempo real (WebSocket) ────────────────────────────────────
+
+@router.websocket("/realtime")
+async def realtime_voice(websocket: WebSocket):
+    """
+    WebSocket de conversación de voz en tiempo real.
+    Protocolo:
+      cliente → {"type": "init", "token": "...", "mode": "conspiranoico", "chat_id": null}
+      cliente → {"type": "audio", "data": "<base64 webm>"}
+      cliente → {"type": "end_audio"}
+      servidor → {"type": "status", "state": "listening"|"thinking"|"speaking"}
+      servidor → {"type": "transcript", "text": "..."}
+      servidor → {"type": "reply_text", "text": "..."}
+      servidor → {"type": "audio", "data": "<base64 mp3>"}
+      servidor → {"type": "done", "chat_id": "..."}
+      servidor → {"type": "error", "message": "..."}
+    """
+    import asyncio, json, base64, logging
+    from app.core.jwt import decode_token
+    from app.llm.groq import GroqProvider
+
+    log = logging.getLogger(__name__)
+    await websocket.accept()
+
+    # 1. Esperar mensaje init con token
+    try:
+        init_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+    except asyncio.TimeoutError:
+        await websocket.send_json({"type": "error", "message": "Timeout esperando init"})
+        await websocket.close()
+        return
+
+    if init_msg.get("type") != "init":
+        await websocket.send_json({"type": "error", "message": "Primer mensaje debe ser init"})
+        await websocket.close()
+        return
+
+    token = init_msg.get("token", "")
+    try:
+        user = decode_token(token)
+    except Exception:
+        await websocket.send_json({"type": "error", "message": "Token inválido"})
+        await websocket.close()
+        return
+
+    mode = init_msg.get("mode", "conspiranoico")
+    chat_id = init_msg.get("chat_id") or None
+
+    await websocket.send_json({"type": "status", "state": "listening"})
+
+    # 2. Loop de conversación
+    try:
+        while True:
+            audio_chunks_b64 = []
+
+            while True:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+                except asyncio.TimeoutError:
+                    await websocket.send_json({"type": "error", "message": "Timeout esperando audio"})
+                    return
+
+                if msg.get("type") == "audio":
+                    audio_chunks_b64.append(msg["data"])
+                elif msg.get("type") == "end_audio":
+                    break
+                elif msg.get("type") == "hangup":
+                    return
+
+            if not audio_chunks_b64:
+                continue
+
+            audio_bytes = b"".join(base64.b64decode(c) for c in audio_chunks_b64)
+
+            # 3. Transcribir con Groq
+            await websocket.send_json({"type": "status", "state": "thinking"})
+            try:
+                groq = GroqProvider()
+                transcript = groq.transcribe(audio_bytes, filename="audio.webm")
+            except Exception as e:
+                log.error(f"Transcripción error: {e}")
+                await websocket.send_json({"type": "error", "message": "Error al transcribir"})
+                await websocket.send_json({"type": "status", "state": "listening"})
+                continue
+
+            if not transcript or not transcript.strip():
+                await websocket.send_json({"type": "status", "state": "listening"})
+                continue
+
+            await websocket.send_json({"type": "transcript", "text": transcript})
+
+            # 4. Crear chat si no existe
+            if not chat_id:
+                new = repo.create_chat(user["id"])
+                chat_id = new["chat_id"]
+
+            repo.save_message(chat_id, "user", transcript)
+            save_message_to_memory(user["id"], "user", transcript)
+
+            # 5. Generar respuesta
+            history = repo.get_messages(chat_id, user["id"])
+            system_prompt = _build_system_prompt(user["id"], transcript, mode)
+            llm = get_llm_provider()
+            messages_llm = [{"role": "system", "content": system_prompt}]
+            messages_llm += [{"role": m["role"], "content": m["content"]} for m in history]
+
+            try:
+                reply = llm.generate(messages_llm)
+            except Exception as e:
+                log.error(f"LLM error: {e}")
+                await websocket.send_json({"type": "error", "message": "Error generando respuesta"})
+                await websocket.send_json({"type": "status", "state": "listening"})
+                continue
+
+            await websocket.send_json({"type": "reply_text", "text": reply})
+            repo.save_message(chat_id, "assistant", reply)
+            save_message_to_memory(user["id"], "assistant", reply)
+
+            # 6. Sintetizar con Fish Audio y enviar en chunks
+            await websocket.send_json({"type": "status", "state": "speaking"})
+            try:
+                voice = get_voice_provider()
+                for chunk in voice.synthesize_stream(reply):
+                    await websocket.send_json({
+                        "type": "audio",
+                        "data": base64.b64encode(chunk).decode(),
+                        "chat_id": chat_id,
+                    })
+            except Exception as e:
+                log.error(f"Fish Audio error: {e}")
+                await websocket.send_json({"type": "error", "message": "Error en síntesis de voz"})
+
+            await websocket.send_json({"type": "done", "chat_id": chat_id})
+            await websocket.send_json({"type": "status", "state": "listening"})
+
+    except WebSocketDisconnect:
+        log.info(f"WebSocket desconectado: {user.get('id')}")
+    except Exception as e:
+        log.exception(f"Error en /chat/realtime: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": "Error interno"})
+        except Exception:
+            pass
