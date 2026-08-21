@@ -421,31 +421,31 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor")
 
 
-# ── Chat de voz en tiempo real (WebSocket) ────────────────────────────────────
+# ── Chat de voz en tiempo real (WebSocket → OpenAI Realtime) ──────────────────
 
 @router.websocket("/realtime")
 async def realtime_voice(websocket: WebSocket):
     """
-    WebSocket de conversación de voz en tiempo real.
-    Protocolo:
-      cliente → {"type": "init", "token": "...", "mode": "conspiranoico", "chat_id": null}
-      cliente → {"type": "audio", "data": "<base64 webm>"}
-      cliente → {"type": "end_audio"}
-      servidor → {"type": "status", "state": "listening"|"thinking"|"speaking"}
-      servidor → {"type": "transcript", "text": "..."}
-      servidor → {"type": "reply_text", "text": "..."}
-      servidor → {"type": "audio", "data": "<base64 mp3>"}
-      servidor → {"type": "done", "chat_id": "..."}
-      servidor → {"type": "error", "message": "..."}
+    Proxy WebSocket entre el cliente y OpenAI Realtime API.
+    Protocolo cliente:
+      → {"type": "init", "token": "...", "mode": "conspiranoico", "chat_id": null}
+      → {"type": "audio", "data": "<base64 pcm16 24khz>"}
+      → {"type": "hangup"}
+    Protocolo servidor:
+      ← {"type": "status", "state": "listening"|"thinking"|"speaking"}
+      ← {"type": "transcript", "text": "..."}
+      ← {"type": "reply_text", "text": "..."}
+      ← {"type": "audio", "data": "<base64 pcm16>"}
+      ← {"type": "done", "chat_id": "..."}
+      ← {"type": "error", "message": "..."}
     """
-    import asyncio, json, base64, logging
+    import asyncio, json, base64, logging, os, websockets
     from app.core.jwt import decode_token
-    from app.llm.groq import GroqProvider
 
     log = logging.getLogger(__name__)
     await websocket.accept()
 
-    # 1. Esperar mensaje init con token
+    # 1. Esperar init con token
     try:
         init_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10)
     except asyncio.TimeoutError:
@@ -469,95 +469,128 @@ async def realtime_voice(websocket: WebSocket):
     mode = init_msg.get("mode", "conspiranoico")
     chat_id = init_msg.get("chat_id") or None
 
-    await websocket.send_json({"type": "status", "state": "listening"})
+    openai_api_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_api_key:
+        await websocket.send_json({"type": "error", "message": "OPENAI_API_KEY no configurada"})
+        await websocket.close()
+        return
 
-    # 2. Loop de conversación
+    # 2. Construir system prompt
+    system_prompt = _build_system_prompt(user["id"], "", mode)
+
+    # 3. Conectar a OpenAI Realtime
+    openai_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03"
+    openai_headers = {
+        "Authorization": f"Bearer {openai_api_key}",
+        "OpenAI-Beta": "realtime=v1",
+    }
+
+    reply_text_buffer = ""
+    transcript_buffer = ""
+
     try:
-        while True:
-            audio_chunks_b64 = []
+        async with websockets.connect(openai_url, additional_headers=openai_headers) as oai_ws:
 
-            while True:
-                try:
-                    msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
-                except asyncio.TimeoutError:
-                    await websocket.send_json({"type": "error", "message": "Timeout esperando audio"})
-                    return
+            # 4. Configurar sesión en OpenAI
+            await oai_ws.send(json.dumps({
+                "type": "session.update",
+                "session": {
+                    "model": "gpt-realtime-2.1",
+                    "modalities": ["audio", "text"],
+                    "voice": "cedar",
+                    "instructions": system_prompt,
+                    "input_audio_format": "pcm16",
+                    "output_audio_format": "pcm16",
+                    "input_audio_transcription": {"model": "whisper-1"},
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 600,
+                    },
+                },
+            }))
 
-                if msg.get("type") == "audio":
-                    audio_chunks_b64.append(msg["data"])
-                elif msg.get("type") == "end_audio":
-                    break
-                elif msg.get("type") == "hangup":
-                    return
-
-            if not audio_chunks_b64:
-                continue
-
-            audio_bytes = b"".join(base64.b64decode(c) for c in audio_chunks_b64)
-
-            # 3. Transcribir con Groq
-            await websocket.send_json({"type": "status", "state": "thinking"})
-            try:
-                groq = GroqProvider()
-                transcript = groq.transcribe(audio_bytes, filename="audio.webm")
-            except Exception as e:
-                log.error(f"Transcripción error: {e}")
-                await websocket.send_json({"type": "error", "message": "Error al transcribir"})
-                await websocket.send_json({"type": "status", "state": "listening"})
-                continue
-
-            if not transcript or not transcript.strip():
-                await websocket.send_json({"type": "status", "state": "listening"})
-                continue
-
-            await websocket.send_json({"type": "transcript", "text": transcript})
-
-            # 4. Crear chat si no existe
-            if not chat_id:
-                new = repo.create_chat(user["id"])
-                chat_id = new["chat_id"]
-
-            repo.save_message(chat_id, "user", transcript)
-            save_message_to_memory(user["id"], "user", transcript)
-
-            # 5. Generar respuesta
-            history = repo.get_messages(chat_id, user["id"])
-            system_prompt = _build_system_prompt(user["id"], transcript, mode)
-            llm = get_llm_provider()
-            messages_llm = [{"role": "system", "content": system_prompt}]
-            messages_llm += [{"role": m["role"], "content": m["content"]} for m in history]
-
-            try:
-                reply = llm.generate(messages_llm)
-            except Exception as e:
-                log.error(f"LLM error: {e}")
-                await websocket.send_json({"type": "error", "message": "Error generando respuesta"})
-                await websocket.send_json({"type": "status", "state": "listening"})
-                continue
-
-            await websocket.send_json({"type": "reply_text", "text": reply})
-            repo.save_message(chat_id, "assistant", reply)
-            save_message_to_memory(user["id"], "assistant", reply)
-
-            # 6. Sintetizar con Fish Audio y enviar en chunks
-            await websocket.send_json({"type": "status", "state": "speaking"})
-            try:
-                voice = get_voice_provider()
-                for chunk in voice.synthesize_stream(reply):
-                    await websocket.send_json({
-                        "type": "audio",
-                        "data": base64.b64encode(chunk).decode(),
-                        "chat_id": chat_id,
-                    })
-            except Exception as e:
-                log.error(f"Fish Audio error: {e}")
-                await websocket.send_json({"type": "error", "message": "Error en síntesis de voz"})
-
-            await websocket.send_json({"type": "done", "chat_id": chat_id})
             await websocket.send_json({"type": "status", "state": "listening"})
 
+            # 5. Loop: proxy de mensajes en ambas direcciones
+            async def from_client():
+                """Recibe audio del cliente y lo envía a OpenAI."""
+                nonlocal chat_id
+                try:
+                    while True:
+                        msg = await websocket.receive_json()
+                        if msg.get("type") == "hangup":
+                            await oai_ws.close()
+                            return
+                        if msg.get("type") == "audio":
+                            await oai_ws.send(json.dumps({
+                                "type": "input_audio_buffer.append",
+                                "audio": msg["data"],
+                            }))
+                except Exception:
+                    await oai_ws.close()
+
+            async def from_openai():
+                """Recibe eventos de OpenAI y los reenvía al cliente."""
+                nonlocal reply_text_buffer, transcript_buffer, chat_id
+                try:
+                    async for raw in oai_ws:
+                        event = json.loads(raw)
+                        etype = event.get("type", "")
+
+                        if etype == "input_audio_buffer.speech_started":
+                            await websocket.send_json({"type": "status", "state": "listening"})
+
+                        elif etype == "response.created":
+                            await websocket.send_json({"type": "status", "state": "thinking"})
+                            reply_text_buffer = ""
+
+                        elif etype == "conversation.item.input_audio_transcription.completed":
+                            transcript_buffer = event.get("transcript", "")
+                            if transcript_buffer:
+                                await websocket.send_json({"type": "transcript", "text": transcript_buffer})
+
+                        elif etype == "response.audio_transcript.delta":
+                            reply_text_buffer += event.get("delta", "")
+
+                        elif etype == "response.audio.delta":
+                            await websocket.send_json({"type": "status", "state": "speaking"})
+                            await websocket.send_json({
+                                "type": "audio",
+                                "data": event.get("delta", ""),
+                            })
+
+                        elif etype == "response.done":
+                            # Guardar en BD
+                            if transcript_buffer or reply_text_buffer:
+                                if not chat_id:
+                                    new = repo.create_chat(user["id"])
+                                    chat_id = new["chat_id"]
+                                if transcript_buffer:
+                                    repo.save_message(chat_id, "user", transcript_buffer)
+                                    save_message_to_memory(user["id"], "user", transcript_buffer)
+                                if reply_text_buffer:
+                                    repo.save_message(chat_id, "assistant", reply_text_buffer)
+                                    save_message_to_memory(user["id"], "assistant", reply_text_buffer)
+                                    await websocket.send_json({"type": "reply_text", "text": reply_text_buffer})
+
+                            await websocket.send_json({"type": "done", "chat_id": chat_id})
+                            await websocket.send_json({"type": "status", "state": "listening"})
+                            reply_text_buffer = ""
+                            transcript_buffer = ""
+
+                        elif etype == "error":
+                            log.error(f"OpenAI Realtime error: {event}")
+                            await websocket.send_json({"type": "error", "message": event.get("error", {}).get("message", "Error OpenAI")})
+
+                except Exception as e:
+                    log.error(f"from_openai error: {e}")
+
+            await asyncio.gather(from_client(), from_openai())
+
     except WebSocketDisconnect:
-        log.info(f"WebSocket desconectado: {user.get('id')}")
+        log.info(f"Cliente desconectado: {user.get('id')}")
     except Exception as e:
         log.exception(f"Error en /chat/realtime: {e}")
         try:
