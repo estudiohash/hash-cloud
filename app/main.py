@@ -15,7 +15,7 @@ from app.payment_monitor import monitor_loop
 from app.paypal_webhook import router as paypal_router
 from app.mercadopago_webhook import router as mp_router
 from app.support_bot import run_bot
-from app.chat.debug_rag import debug_router
+from app.chat.debug_rag import router as debug_router
 import asyncio
 import logging
 
