@@ -108,40 +108,20 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str
 
     document_id, created = get_or_create_document(user_id, key, name, description, chat_id=chat_id)
 
-    # Dividir en bloques semánticos de máximo 2000 caracteres.
-    # Corta en párrafos (línea vacía) para no romper ideas a la mitad.
-    MAX_CHARS = 2000
-    paragraphs = content.strip().split("\n\n")
+    # Un mensaje = un chunk. No acumular mensajes distintos en el mismo embedding.
+    # Solo dividir si un mensaje individual supera MAX_CHARS.
+    MAX_CHARS = 6000
+    paragraphs = [p.strip() for p in content.strip().split("\n\n") if p.strip()]
+
     chunks = []
-    current = []
-    current_len = 0
-
     for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-        # Si el párrafo solo ya supera el límite, subdividirlo por líneas
-        if len(para) > MAX_CHARS:
-            for line in para.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                if current_len + len(line) + 1 > MAX_CHARS and current:
-                    chunks.append("\n\n".join(current))
-                    current = []
-                    current_len = 0
-                current.append(line)
-                current_len += len(line) + 1
+        if len(para) <= MAX_CHARS:
+            chunks.append(para)
         else:
-            if current_len + len(para) + 2 > MAX_CHARS and current:
-                chunks.append("\n\n".join(current))
-                current = []
-                current_len = 0
-            current.append(para)
-            current_len += len(para) + 2
-
-    if current:
-        chunks.append("\n\n".join(current))
+            for i in range(0, len(para), MAX_CHARS):
+                part = para[i:i + MAX_CHARS].strip()
+                if part:
+                    chunks.append(part)
 
     for chunk_text in chunks:
         if chunk_text.strip():
