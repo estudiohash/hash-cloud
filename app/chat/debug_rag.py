@@ -8,14 +8,16 @@ router = APIRouter(prefix="/chat", tags=["debug"])
 
 
 @router.get("/debug/rag")
-def debug_rag(query: str = "test", user: dict = Depends(require_auth)):
+def debug_rag(
+    query: str = "test",
+    threshold: float = 0.50,
+    user: dict = Depends(require_auth),
+):
     """
-    Muestra exactamente qué filas devolvería search_memory_by_embedding()
-    con el mismo filtro que usa producción:
-      - role = 'user' OR role IS NULL (excluye respuestas del assistant)
-      - embedding IS NOT NULL
-      - similarity >= 0.50
-      - top_k = 20
+    Debug del RAG. Parámetros:
+      - query     : texto de búsqueda (default: "test")
+      - threshold : similarity mínima (default: 0.50, usá 0 para ver todos los candidatos)
+    Aplica el mismo filtro de producción: role = 'user' OR role IS NULL.
     """
     query_embedding = get_query_embedding(query)
     if not query_embedding:
@@ -34,35 +36,38 @@ def debug_rag(query: str = "test", user: dict = Depends(require_auth)):
                 JOIN memory_documents md ON md.id = mr.document_id
                 WHERE md.user_id = %s
                   AND mr.embedding IS NOT NULL
-                  AND 1 - (mr.embedding <=> %s::vector) >= 0.50
+                  AND 1 - (mr.embedding <=> %s::vector) >= %s
                   AND (mr.data->>'role' = 'user' OR mr.data->>'role' IS NULL)
                 ORDER BY mr.embedding <=> %s::vector
                 LIMIT 20
-            """, (str(query_embedding), user["id"], str(query_embedding), str(query_embedding)))
+            """, (str(query_embedding), user["id"], str(query_embedding), threshold, str(query_embedding)))
             rows = cur.fetchall()
     except Exception as e:
         return {"error": str(e), "query": query}
 
     results = []
     for r in rows:
-        msg = r["data"].get("message", "")
-        try:
-            msg = decrypt(msg)
-        except Exception:
-            pass
+        raw = r["data"].get("message") or ""
+        if raw:
+            try:
+                msg = decrypt(raw)
+            except Exception:
+                msg = raw  # no estaba encriptado, usar tal cual
+        else:
+            msg = ""
+
         results.append({
             "id": str(r["id"]),
-            "document": r["document"],
             "document_key": r["document_key"],
+            "document": r["document"],
             "role": r["data"].get("role"),
             "similarity": round(float(r["similarity"]), 4),
-            "message_preview": msg[:200],
+            "message": msg[:300],
         })
 
     return {
         "query": query,
-        "threshold": 0.50,
-        "top_k": 20,
+        "threshold_used": threshold,
         "filter": "role = 'user' OR role IS NULL",
         "total_results": len(results),
         "results": results,
