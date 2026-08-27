@@ -10,7 +10,7 @@ router = APIRouter(prefix="/chat", tags=["debug"])
 @router.get("/debug/rag")
 def debug_rag(
     query: str = "test",
-    threshold: float = 0.50,
+    threshold: float = 0.30,
     user: dict = Depends(require_auth),
 ):
     """
