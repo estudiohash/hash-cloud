@@ -92,6 +92,7 @@ def search_memory_by_embedding(user_id: str, query: str, limit: int = 20, min_si
                 WHERE md.user_id = %s
                   AND mr.embedding IS NOT NULL
                   AND 1 - (mr.embedding <=> %s::vector) >= %s
+                  AND (mr.data->>'role' = 'user' OR mr.data->>'role' IS NULL)
                 ORDER BY mr.embedding <=> %s::vector
                 LIMIT %s
             """, (str(query_embedding), user_id, str(query_embedding), min_similarity, str(query_embedding), limit))
