@@ -17,7 +17,7 @@ def debug_rag(
     Debug del RAG. Parámetros:
       - query     : texto de búsqueda (default: "test")
       - threshold : similarity mínima (default: 0.50, usá 0 para ver todos los candidatos)
-    Aplica el mismo filtro de producción: role = 'user' OR role IS NULL.
+    Aplica el mismo filtro de producción: md.key LIKE 'memoria_hash_%'.
     """
     query_embedding = get_query_embedding(query)
     if not query_embedding:
@@ -37,7 +37,7 @@ def debug_rag(
                 WHERE md.user_id = %s
                   AND mr.embedding IS NOT NULL
                   AND 1 - (mr.embedding <=> %s::vector) >= %s
-                  AND (mr.data->>'role' = 'user' OR mr.data->>'role' IS NULL)
+                  AND md.key LIKE 'memoria_hash_%'
                 ORDER BY mr.embedding <=> %s::vector
                 LIMIT 20
             """, (str(query_embedding), user["id"], str(query_embedding), threshold, str(query_embedding)))
@@ -68,7 +68,7 @@ def debug_rag(
     return {
         "query": query,
         "threshold_used": threshold,
-        "filter": "role = 'user' OR role IS NULL",
+        "filter": "md.key LIKE 'memoria_hash_%'",
         "total_results": len(results),
         "results": results,
     }
