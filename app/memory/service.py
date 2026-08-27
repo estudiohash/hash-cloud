@@ -73,7 +73,7 @@ def save_message_to_memory(user_id: str, role: str, content: str) -> None:
     document_id, _ = get_or_create_document(
         user_id, "chat_log", "Chat log", "Historial automático de conversaciones"
     )
-    add_row(document_id, {"role": role, "message": content})
+    add_row(document_id, {"role": role, "message": content}, with_embedding=True)
 
 
 def export_memory(user_id: str) -> str:
