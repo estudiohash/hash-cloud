@@ -78,7 +78,7 @@ def add_row(document_id: str, data: dict, with_embedding: bool = False) -> dict:
     return {**data, "created_at": created_at.isoformat()}
 
 
-def search_memory_by_embedding(user_id: str, query: str, limit: int = 10, min_similarity: float = 0.50) -> list[dict]:
+def search_memory_by_embedding(user_id: str, query: str, limit: int = 20, min_similarity: float = 0.50) -> list[dict]:
     """Busca en memoria usando similitud de embeddings."""
     query_embedding = get_query_embedding(query)
     if not query_embedding:
