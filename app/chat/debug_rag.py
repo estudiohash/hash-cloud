@@ -1,8 +1,6 @@
 # app/chat/debug_rag.py
 # Endpoint temporal de diagnóstico RAG.
 # NO modifica ningún dato. Solo lectura.
-# Agregar en main.py: from app.chat.debug_rag import debug_router
-#                     app.include_router(debug_router)
 
 from fastapi import APIRouter, Depends, Query
 from app.core.jwt import require_auth
@@ -10,19 +8,19 @@ from app.core.encryption import decrypt
 from app.context.provider import get_hash_sources, STYLES, DEFAULT_STYLE
 from app.compiler.base_compiler import compile_base_context
 from app.compiler.style_compiler import compile_style_context
-from app.memory.embeddings import get_embedding
+from app.memory.embeddings import get_query_embedding
 from app.core.database import get_cursor
 
 debug_router = APIRouter(prefix="/debug", tags=["debug"])
 
+SEARCH_THRESHOLD = 0.50
 
-def _raw_search_with_scores(user_id: str, query: str, limit: int = 10) -> list[dict]:
+
+def _raw_search_all(user_id: str, query: str, limit: int = 10) -> list[dict]:
     """
-    Replica exactamente search_memory_by_embedding del repository
-    pero devuelve también el similarity score y metadatos completos.
-    Sin threshold: muestra todo lo que ve el sistema real.
+    Recupera los top-N resultados SIN threshold para mostrar antes/después.
     """
-    query_embedding = get_embedding(query)
+    query_embedding = get_query_embedding(query)
     if not query_embedding:
         return []
     try:
@@ -43,18 +41,17 @@ def _raw_search_with_scores(user_id: str, query: str, limit: int = 10) -> list[d
                 LIMIT %s
             """, (str(query_embedding), user_id, str(query_embedding), limit))
             return cur.fetchall()
-    except Exception as e:
+    except Exception:
         return []
 
 
-def _count_rows(user_id: str) -> dict:
-    """Conteo de filas totales y con embedding, por documento."""
+def _count_rows(user_id: str) -> list:
     with get_cursor() as cur:
         cur.execute("""
             SELECT
                 md.key,
                 md.name,
-                COUNT(mr.id)                                      AS total_rows,
+                COUNT(mr.id)                                         AS total_rows,
                 COUNT(mr.id) FILTER (WHERE mr.embedding IS NOT NULL) AS rows_with_embedding
             FROM memory_documents md
             LEFT JOIN memory_rows mr ON mr.document_id = md.id
@@ -67,35 +64,26 @@ def _count_rows(user_id: str) -> dict:
 
 @debug_router.get("/rag")
 def debug_rag(
-    query: str = Query(..., description="Texto de prueba, igual al mensaje que mandarías al chat"),
-    mode: str = Query("conspiranoico", description="Modo de estilo: conspiranoico, analista, terapeuta, zen, hacker, masivo"),
-    limit: int = Query(10, description="Cantidad de recuerdos a recuperar (mismo default que el sistema real)"),
+    query: str = Query(...),
+    mode: str = Query("conspiranoico"),
+    limit: int = Query(10),
+    threshold: float = Query(SEARCH_THRESHOLD),
     user: dict = Depends(require_auth),
 ):
-    """
-    Diagnóstico completo del pipeline RAG para un usuario autenticado.
-    No escribe nada, no modifica nada.
-
-    Uso:
-      GET /debug/rag?query=quien es mateo&mode=analista
-    """
     user_id = user["id"]
 
-    # ── 1. Mode resolution ────────────────────────────────────────────────────
+    # Mode
     mode_resolved = mode if mode in STYLES else DEFAULT_STYLE
-    mode_was_fallback = mode_resolved != mode
 
-    # ── 2. Estilo ─────────────────────────────────────────────────────────────
+    # Estilo y contexto
     sources = get_hash_sources(mode_resolved)
     style_text = compile_style_context(sources)["sources"]["style"]
     base_ctx = compile_base_context(sources)
 
-    # ── 3. Búsqueda RAG con scores ────────────────────────────────────────────
-    raw_rows = _raw_search_with_scores(user_id, query, limit=limit)
+    # Búsqueda sin threshold (para mostrar todos los candidatos)
+    raw_rows = _raw_search_all(user_id, query, limit=limit)
 
-    memories = []
-    memory_total_chars = 0
-
+    all_results = []
     for r in raw_rows:
         msg = r["data"].get("message", "")
         if not msg:
@@ -104,28 +92,25 @@ def debug_rag(
             msg = decrypt(msg)
         except Exception:
             pass
-
-        # El sistema real trunca a 500 chars
         truncated = msg.strip()[:500]
-        entry_text = f"[{r['doc_name']}]\n{truncated}"
-        entry_chars = len(entry_text)
-        memory_total_chars += entry_chars
-
-        memories.append({
-            "row_id":        r["row_id"],
-            "doc_key":       r["doc_key"],
-            "doc_name":      r["doc_name"],
-            "similarity":    round(float(r["similarity"]), 4),
-            "text_preview":  truncated[:200] + ("…" if len(truncated) > 200 else ""),
-            "text_full_chars": len(truncated),
-            "entry_chars":   entry_chars,   # incluye "[doc_name]\n"
-            "created_at":    r["created_at"].isoformat(),
+        all_results.append({
+            "row_id":      r["row_id"],
+            "doc_key":     r["doc_key"],
+            "doc_name":    r["doc_name"],
+            "similarity":  round(float(r["similarity"]), 4),
+            "above_threshold": float(r["similarity"]) >= threshold,
+            "text_preview": truncated[:200] + ("…" if len(truncated) > 200 else ""),
+            "entry_chars": len(f"[{r['doc_name']}]\n{truncated}"),
+            "created_at":  r["created_at"].isoformat(),
         })
 
-    # ── 4. Reconstruir system prompt exacto ───────────────────────────────────
+    results_after = [r for r in all_results if r["above_threshold"]]
+
+    # Reconstruir memory block solo con los que pasan el threshold
+    memory_total_chars = sum(r["entry_chars"] for r in results_after)
     memory_block = "\n\n".join(
-        f"[{m['doc_name']}]\n{m['text_preview']}" for m in memories
-    ) if memories else ""
+        f"[{r['doc_name']}]\n{r['text_preview']}" for r in results_after
+    ) if results_after else ""
 
     system_prompt = (
         f"Fecha y hora actual: {base_ctx['fecha_actual']}\n\n"
@@ -136,45 +121,43 @@ def debug_rag(
         f"Estilo:\n{style_text}"
     )
 
-    # ── 5. Conteo de memoria del usuario ─────────────────────────────────────
     doc_stats = _count_rows(user_id)
-    total_rows_in_db = sum(d["total_rows"] for d in doc_stats)
-    total_with_embedding = sum(d["rows_with_embedding"] for d in doc_stats)
 
-    # ── 6. Respuesta ─────────────────────────────────────────────────────────
     return {
         "query": query,
 
         "mode": {
-            "received":    mode,
-            "resolved":    mode_resolved,
-            "was_fallback": mode_was_fallback,
+            "received":     mode,
+            "resolved":     mode_resolved,
+            "was_fallback": mode_resolved != mode,
         },
 
         "style": {
-            "chars": len(style_text),
+            "chars":   len(style_text),
             "preview": style_text[:300] + ("…" if len(style_text) > 300 else ""),
         },
 
         "memories": {
-            "retrieved_count":    len(memories),
-            "total_chars":        memory_total_chars,
-            "rows_in_db":         total_rows_in_db,
-            "rows_with_embedding": total_with_embedding,
-            "results": memories,
+            "threshold":                  threshold,
+            "retrieved_before_threshold": len(all_results),
+            "retrieved_after_threshold":  len(results_after),
+            "total_chars_after":          memory_total_chars,
+            "rows_in_db":                 sum(d["total_rows"] for d in doc_stats),
+            "rows_with_embedding":        sum(d["rows_with_embedding"] for d in doc_stats),
+            "results": all_results,
         },
 
         "system_prompt": {
-            "total_chars":   len(system_prompt),
-            "memory_pct":    round(memory_total_chars / len(system_prompt) * 100, 1) if system_prompt else 0,
-            "style_pct":     round(len(style_text) / len(system_prompt) * 100, 1) if system_prompt else 0,
+            "total_chars": len(system_prompt),
+            "memory_pct":  round(memory_total_chars / len(system_prompt) * 100, 1) if system_prompt else 0,
+            "style_pct":   round(len(style_text) / len(system_prompt) * 100, 1) if system_prompt else 0,
         },
 
         "db_documents": [
             {
-                "key":                d["key"],
-                "name":               d["name"],
-                "total_rows":         d["total_rows"],
+                "key":                 d["key"],
+                "name":                d["name"],
+                "total_rows":          d["total_rows"],
                 "rows_with_embedding": d["rows_with_embedding"],
             }
             for d in doc_stats

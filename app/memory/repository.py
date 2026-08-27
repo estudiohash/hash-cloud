@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from psycopg2.extras import Json
 from app.core.database import get_cursor
 from app.core.encryption import encrypt, decrypt
-from app.memory.embeddings import get_embedding
+from app.memory.embeddings import get_embedding, get_query_embedding
 
 
 def user_exists(user_id: str) -> bool:
@@ -78,9 +78,9 @@ def add_row(document_id: str, data: dict, with_embedding: bool = False) -> dict:
     return {**data, "created_at": created_at.isoformat()}
 
 
-def search_memory_by_embedding(user_id: str, query: str, limit: int = 10) -> list[dict]:
+def search_memory_by_embedding(user_id: str, query: str, limit: int = 10, min_similarity: float = 0.50) -> list[dict]:
     """Busca en memoria usando similitud de embeddings."""
-    query_embedding = get_embedding(query)
+    query_embedding = get_query_embedding(query)
     if not query_embedding:
         return []
     try:
@@ -89,10 +89,12 @@ def search_memory_by_embedding(user_id: str, query: str, limit: int = 10) -> lis
                 SELECT md.name, mr.data, 1 - (mr.embedding <=> %s::vector) AS similarity
                 FROM memory_rows mr
                 JOIN memory_documents md ON md.id = mr.document_id
-                WHERE md.user_id = %s AND mr.embedding IS NOT NULL
+                WHERE md.user_id = %s
+                  AND mr.embedding IS NOT NULL
+                  AND 1 - (mr.embedding <=> %s::vector) >= %s
                 ORDER BY mr.embedding <=> %s::vector
                 LIMIT %s
-            """, (str(query_embedding), user_id, str(query_embedding), limit))
+            """, (str(query_embedding), user_id, str(query_embedding), min_similarity, str(query_embedding), limit))
             return cur.fetchall()
     except Exception:
         return []
