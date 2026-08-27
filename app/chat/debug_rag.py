@@ -66,7 +66,7 @@ def _count_rows(user_id: str) -> list:
 def debug_rag(
     query: str = Query(...),
     mode: str = Query("conspiranoico"),
-    limit: int = Query(10),
+    limit: int = Query(20),
     threshold: float = Query(SEARCH_THRESHOLD),
     user: dict = Depends(require_auth),
 ):
