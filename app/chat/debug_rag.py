@@ -37,7 +37,7 @@ def debug_rag(
                 WHERE md.user_id = %s
                   AND mr.embedding IS NOT NULL
                   AND 1 - (mr.embedding <=> %s::vector) >= %s
-                  AND md.key LIKE 'memoria_hash_%'
+                  AND md.key LIKE 'memoria_hash_%%'
                 ORDER BY mr.embedding <=> %s::vector
                 LIMIT 20
             """, (str(query_embedding), user["id"], str(query_embedding), threshold, str(query_embedding)))
