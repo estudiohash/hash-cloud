@@ -77,22 +77,23 @@ def save_message_to_memory(user_id: str, role: str, content: str) -> None:
 
 
 def export_memory(user_id: str) -> str:
-    """Devuelve toda la memoria del usuario como texto plano."""
+    """
+    Devuelve toda la memoria del usuario como texto plano limpio.
+    Sin headers de documento ni prefijos [user]/[assistant].
+    Conserva todo el contenido y los saltos entre bloques.
+    """
     if not user_exists(user_id):
         return ""
     documents = get_documents_with_rows(user_id)
-    lines = []
+    blocks = []
     for doc in documents:
-        lines.append(f"=== {doc['name']} ===")
+        if doc["key"].startswith("memoria_hash_"):
+            continue
         for row in doc["rows"]:
-            role = row.get("role", "")
-            msg = row.get("message", "")
-            if role:
-                lines.append(f"[{role}] {msg}")
-            else:
-                lines.append(msg)
-        lines.append("")
-    return "\n".join(lines)
+            msg = row.get("message", "").strip()
+            if msg:
+                blocks.append(msg)
+    return "\n\n".join(blocks)
 
 
 def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str | None = None) -> dict:
@@ -107,14 +108,43 @@ def upload_txt_as_memory(user_id: str, filename: str, content: str, chat_id: str
 
     document_id, created = get_or_create_document(user_id, key, name, description, chat_id=chat_id)
 
-    # Dividir en chunks de ~1600 líneas (~250KB) y guardar cada uno con embedding
-    lines = content.strip().splitlines()
-    chunk_size = 1600
-    chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
+    # Dividir en bloques semánticos de máximo 2000 caracteres.
+    # Corta en párrafos (línea vacía) para no romper ideas a la mitad.
+    MAX_CHARS = 2000
+    paragraphs = content.strip().split("\n\n")
+    chunks = []
+    current = []
+    current_len = 0
 
-    for chunk in chunks:
-        chunk_text = '\n'.join(chunk).strip()
-        if chunk_text:
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        # Si el párrafo solo ya supera el límite, subdividirlo por líneas
+        if len(para) > MAX_CHARS:
+            for line in para.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if current_len + len(line) + 1 > MAX_CHARS and current:
+                    chunks.append("\n\n".join(current))
+                    current = []
+                    current_len = 0
+                current.append(line)
+                current_len += len(line) + 1
+        else:
+            if current_len + len(para) + 2 > MAX_CHARS and current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_len = 0
+            current.append(para)
+            current_len += len(para) + 2
+
+    if current:
+        chunks.append("\n\n".join(current))
+
+    for chunk_text in chunks:
+        if chunk_text.strip():
             add_row(document_id, {"message": chunk_text}, with_embedding=True)
 
     return {"document": key, "created": created, "rows_added": len(chunks)}
