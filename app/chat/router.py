@@ -461,7 +461,12 @@ async def realtime_voice(websocket: WebSocket):
 
     token = init_msg.get("token", "")
     try:
-        user = decode_token(token)
+        payload = decode_token(token)
+        user = {
+            "id": payload.get("sub"),
+            "name": payload.get("name"),
+            "email": payload.get("email"),
+        }
     except Exception:
         await websocket.send_json({"type": "error", "message": "Token inválido"})
         await websocket.close()
