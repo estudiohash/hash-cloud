@@ -462,8 +462,6 @@ async def realtime_voice(websocket: WebSocket):
     token = init_msg.get("token", "")
     try:
         user = decode_token(token)
-        if "id" not in user and "sub" in user:
-            user["id"] = user["sub"]
     except Exception:
         await websocket.send_json({"type": "error", "message": "Token inválido"})
         await websocket.close()
@@ -485,7 +483,6 @@ async def realtime_voice(websocket: WebSocket):
     openai_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03"
     openai_headers = {
         "Authorization": f"Bearer {openai_api_key}",
-        "OpenAI-Beta": "realtime=v1",
     }
 
     reply_text_buffer = ""
