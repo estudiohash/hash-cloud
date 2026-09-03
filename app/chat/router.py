@@ -536,7 +536,7 @@ async def realtime_voice(websocket: WebSocket):
                             return
                         if msg.get("type") == "audio":
                             await oai_ws.send(json.dumps({
-                                "type": "audio.input.append",
+                                "type": "input_audio_buffer.append",
                                 "audio": msg["data"],
                             }))
                 except Exception:
@@ -549,23 +549,24 @@ async def realtime_voice(websocket: WebSocket):
                     async for raw in oai_ws:
                         event = json.loads(raw)
                         etype = event.get("type", "")
+                        log.info(f"[OAI EVENT] {etype}")
 
-                        if etype == "audio.input.speech_started":
+                        if etype == "input_audio_buffer.speech_started":
                             await websocket.send_json({"type": "status", "state": "listening"})
 
                         elif etype == "response.created":
                             await websocket.send_json({"type": "status", "state": "thinking"})
                             reply_text_buffer = ""
 
-                        elif etype == "audio.input.transcription.completed":
+                        elif etype == "conversation.item.input_audio_transcription.completed":
                             transcript_buffer = event.get("transcript", "")
                             if transcript_buffer:
                                 await websocket.send_json({"type": "transcript", "text": transcript_buffer})
 
-                        elif etype == "response.output.audio_transcript.delta":
+                        elif etype == "response.audio_transcript.delta":
                             reply_text_buffer += event.get("delta", "")
 
-                        elif etype == "response.output.audio.delta":
+                        elif etype == "response.audio.delta":
                             await websocket.send_json({"type": "status", "state": "speaking"})
                             await websocket.send_json({
                                 "type": "audio",
