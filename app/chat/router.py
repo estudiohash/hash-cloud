@@ -501,7 +501,6 @@ async def realtime_voice(websocket: WebSocket):
                 "type": "session.update",
                 "session": {
                     "type": "realtime",
-                    "modalities": ["audio", "text"],
                     "voice": "cedar",
                     "instructions": system_prompt,
                     "input_audio_format": "pcm16",
