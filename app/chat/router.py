@@ -500,7 +500,7 @@ async def realtime_voice(websocket: WebSocket):
             await oai_ws.send(json.dumps({
                 "type": "session.update",
                 "session": {
-                    "type": "session",
+                    "type": "realtime",
                     "modalities": ["audio", "text"],
                     "voice": "cedar",
                     "instructions": system_prompt,
