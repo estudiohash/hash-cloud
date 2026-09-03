@@ -348,6 +348,7 @@ def synthesize(body: SynthesizeRequest, user: dict = Depends(require_auth)):
 async def voice_chat(
     audio: UploadFile = File(...),
     chat_id: str = Form(None),
+    mode: str = Form("conspiranoico"),
     user: dict = Depends(require_auth),
 ):
     """Recibe audio → transcribe → responde → devuelve audio."""
@@ -374,7 +375,7 @@ async def voice_chat(
         history = repo.get_messages(chat_id, user["id"])
 
         # 5. Generar respuesta con el proveedor normal (Gemini/Grok)
-        system_prompt = _build_system_prompt(user["id"], transcript)
+        system_prompt = _build_system_prompt(user["id"], transcript, mode)
         llm = get_llm_provider()
         messages = [{"role": "system", "content": system_prompt}]
         messages += [{"role": m["role"], "content": m["content"]} for m in history]
