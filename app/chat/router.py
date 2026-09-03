@@ -398,6 +398,7 @@ async def voice_chat(
         import logging
         logging.getLogger(__name__).exception("Error en /chat/voice")
         raise HTTPException(status_code=500, detail="Error en chat de voz")
+@router.post("/synthesize/stream")
 def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
         voice = get_voice_provider()
