@@ -462,6 +462,8 @@ async def realtime_voice(websocket: WebSocket):
     token = init_msg.get("token", "")
     try:
         user = decode_token(token)
+        if "id" not in user and "sub" in user:
+            user["id"] = user["sub"]
     except Exception:
         await websocket.send_json({"type": "error", "message": "Token inválido"})
         await websocket.close()
