@@ -403,16 +403,19 @@ def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth
     try:
         voice = get_voice_provider()
 
+        fmt = body.format or "mp3"
+        media_type = "audio/mp4" if fmt == "aac" else "audio/mpeg"
+
         def audio_chunks():
             try:
-                for chunk in voice.synthesize_stream(body.text, voice_id=body.voice_id):
+                for chunk in voice.synthesize_stream(body.text, voice_id=body.voice_id, format=fmt):
                     yield chunk
             except Exception as e:
                 print(f"Error en stream de audio: {e}")
 
         return StreamingResponse(
             audio_chunks(),
-            media_type="audio/mpeg",
+            media_type=media_type,
             headers={"Cache-Control": "no-cache"},
         )
     except RuntimeError as e:

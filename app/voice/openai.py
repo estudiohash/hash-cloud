@@ -34,7 +34,8 @@ class OpenAIVoiceProvider(VoiceProvider):
             raise RuntimeError(f"OpenAI TTS error {response.status_code}: {response.text}")
         return response.content
 
-    def synthesize_stream(self, text: str, voice_id: str | None = None):
+    def synthesize_stream(self, text: str, voice_id: str | None = None, format: str = "mp3"):
+        # OpenAI acepta "mp3" o "aac"
         response = requests.post(
             OPENAI_TTS_URL,
             headers={
@@ -45,7 +46,7 @@ class OpenAIVoiceProvider(VoiceProvider):
                 "model": "gpt-4o-mini-tts",
                 "input": text,
                 "voice": voice_id or "cedar",
-                "response_format": "mp3",
+                "response_format": format,
                 "instructions": "Hablá en español rioplatense argentino, con voz natural y fluida.",
             },
             timeout=60,

@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
 class SynthesizeRequest(BaseModel):
     text: str
     voice_id: str | None = None
+    format: str | None = "mp3"  # "mp3" o "aac"
 
 
 class ChatCreateResponse(BaseModel):
