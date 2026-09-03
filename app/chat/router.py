@@ -507,17 +507,17 @@ async def realtime_voice(websocket: WebSocket):
                         "input": {
                             "transcription": {
                                 "model": "gpt-4o-mini-transcribe"
-                            }
+                            },
+                            "turn_detection": {
+                                "type": "server_vad",
+                                "threshold": 0.5,
+                                "prefix_padding_ms": 300,
+                                "silence_duration_ms": 600,
+                            },
                         },
                         "output": {
                             "voice": "cedar"
                         }
-                    },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 600,
                     },
                 },
             }))
@@ -536,7 +536,7 @@ async def realtime_voice(websocket: WebSocket):
                             return
                         if msg.get("type") == "audio":
                             await oai_ws.send(json.dumps({
-                                "type": "input_audio_buffer.append",
+                                "type": "audio.input.append",
                                 "audio": msg["data"],
                             }))
                 except Exception:
@@ -550,22 +550,22 @@ async def realtime_voice(websocket: WebSocket):
                         event = json.loads(raw)
                         etype = event.get("type", "")
 
-                        if etype == "input_audio_buffer.speech_started":
+                        if etype == "audio.input.speech_started":
                             await websocket.send_json({"type": "status", "state": "listening"})
 
                         elif etype == "response.created":
                             await websocket.send_json({"type": "status", "state": "thinking"})
                             reply_text_buffer = ""
 
-                        elif etype == "conversation.item.input_audio_transcription.completed":
+                        elif etype == "audio.input.transcription.completed":
                             transcript_buffer = event.get("transcript", "")
                             if transcript_buffer:
                                 await websocket.send_json({"type": "transcript", "text": transcript_buffer})
 
-                        elif etype == "response.audio_transcript.delta":
+                        elif etype == "response.output.audio_transcript.delta":
                             reply_text_buffer += event.get("delta", "")
 
-                        elif etype == "response.audio.delta":
+                        elif etype == "response.output.audio.delta":
                             await websocket.send_json({"type": "status", "state": "speaking"})
                             await websocket.send_json({
                                 "type": "audio",
