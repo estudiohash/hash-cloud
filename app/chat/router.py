@@ -501,10 +501,13 @@ async def realtime_voice(websocket: WebSocket):
                 "type": "session.update",
                 "session": {
                     "type": "realtime",
-                    "voice": "cedar",
+                    "model": "gpt-realtime-2.1",
                     "instructions": system_prompt,
-                    "input_audio_format": "pcm16",
-                    "output_audio_format": "pcm16",
+                    "audio": {
+                        "output": {
+                            "voice": "cedar"
+                        }
+                    },
                     "input_audio_transcription": {"model": "whisper-1"},
                     "turn_detection": {
                         "type": "server_vad",
