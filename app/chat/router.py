@@ -485,7 +485,7 @@ async def realtime_voice(websocket: WebSocket):
     system_prompt = _build_system_prompt(user["id"], "", mode)
 
     # 3. Conectar a OpenAI Realtime
-    openai_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03"
+    openai_url = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1"
     openai_headers = {
         "Authorization": f"Bearer {openai_api_key}",
     }
@@ -500,7 +500,6 @@ async def realtime_voice(websocket: WebSocket):
             await oai_ws.send(json.dumps({
                 "type": "session.update",
                 "session": {
-                    "model": "gpt-realtime-2.1",
                     "modalities": ["audio", "text"],
                     "voice": "cedar",
                     "instructions": system_prompt,
