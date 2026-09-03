@@ -504,11 +504,15 @@ async def realtime_voice(websocket: WebSocket):
                     "model": "gpt-realtime-2.1",
                     "instructions": system_prompt,
                     "audio": {
+                        "input": {
+                            "transcription": {
+                                "model": "gpt-4o-mini-transcribe"
+                            }
+                        },
                         "output": {
                             "voice": "cedar"
                         }
                     },
-                    "input_audio_transcription": {"model": "whisper-1"},
                     "turn_detection": {
                         "type": "server_vad",
                         "threshold": 0.5,
