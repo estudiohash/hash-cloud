@@ -25,6 +25,7 @@ class OpenAIVoiceProvider(VoiceProvider):
                 "input": text,
                 "voice": voice_id or "cedar",
                 "response_format": "mp3",
+                "instructions": "Hablá en español rioplatense argentino, con voz natural y fluida.",
             },
             timeout=30,
         )
@@ -45,6 +46,7 @@ class OpenAIVoiceProvider(VoiceProvider):
                 "input": text,
                 "voice": voice_id or "cedar",
                 "response_format": "mp3",
+                "instructions": "Hablá en español rioplatense argentino, con voz natural y fluida.",
             },
             timeout=60,
             stream=True,
