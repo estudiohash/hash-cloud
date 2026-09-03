@@ -13,6 +13,7 @@ class OpenAIVoiceProvider(VoiceProvider):
             raise RuntimeError("OPENAI_API_KEY no configurada")
 
     def synthesize(self, text: str, voice_id: str | None = None) -> bytes:
+        print(f">>> OpenAI TTS: voice={voice_id or chr(39)+"cedar"+chr(39)}, chars={len(text)}", flush=True)
         response = requests.post(
             OPENAI_TTS_URL,
             headers={
