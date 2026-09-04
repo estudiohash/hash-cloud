@@ -398,6 +398,33 @@ async def voice_chat(
         import logging
         logging.getLogger(__name__).exception("Error en /chat/voice")
         raise HTTPException(status_code=500, detail="Error en chat de voz")
+@router.get("/synthesize/stream")
+def synthesize_stream_get(text: str, token: str, voice_id: str = "coral", format: str = "mp3"):
+    """GET para Safari/iOS — token en query param para usar con <audio src> nativo."""
+    from app.core.jwt import decode_token
+    try:
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Token inválido")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    try:
+        voice = get_voice_provider()
+        fmt = format if format in ("mp3", "aac") else "mp3"
+        media_type = "audio/mp4" if fmt == "aac" else "audio/mpeg"
+        def audio_chunks():
+            try:
+                for chunk in voice.synthesize_stream(text, voice_id=voice_id, format=fmt):
+                    yield chunk
+            except Exception as e:
+                print(f"Error en stream GET: {e}")
+        return StreamingResponse(audio_chunks(), media_type=media_type, headers={"Cache-Control": "no-cache"})
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Servicio de voz no disponible")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error interno")
+
+
 @router.post("/synthesize/stream")
 def synthesize_stream(body: SynthesizeRequest, user: dict = Depends(require_auth)):
     try:
